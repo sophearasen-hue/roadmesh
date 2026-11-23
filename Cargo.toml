@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["core", "sim", "server"]
+# cargo-fuzz targets build with a pinned nightly (see fuzz/README.md)
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.1.0"
@@ -18,3 +20,8 @@ all = { level = "deny", priority = -1 }
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
+
+# Crypto in debug builds and tests would otherwise be ~50x slower; the simulator
+# verifies every message with real ECDSA. Optimises dependencies only.
+[profile.dev.package."*"]
+opt-level = 3

@@ -1,0 +1,39 @@
+[package]
+name = "roadmesh-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "cargo-fuzz targets for the parsers of untrusted bytes (AUDIT S-10). Not part of the product."
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "getrandom"] }
+roadmesh-core = { path = "../core" }
+roadmesh-server = { path = "../server" }
+
+[[bin]]
+name = "rsm_frame"
+path = "fuzz_targets/rsm_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "receive_pipeline"
+path = "fuzz_targets/receive_pipeline.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pki_parsers"
+path = "fuzz_targets/pki_parsers.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = 1

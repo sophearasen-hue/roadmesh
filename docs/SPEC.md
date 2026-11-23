@@ -64,7 +64,7 @@ Every device broadcasts one compact binary RSM. It is 31 bytes before the signat
 | hop\_count + ttl | uint8 | 1 | 4 bits each (section 5) |
 | origin\_pos\_age | uint16 | 2 | ms since the origin sent it (relayed messages only) |
 | event\_code | uint8 | 1 | Event messages only: 1 crash, 2 hard brake, 3 wrong-way, 4 hazard, 5 stopped traffic (0 = none) |
-| signature | bytes | 64 | ECDSA P-256 (section 10). Can be truncated to a 16-byte MAC on LoRa |
+| signature | bytes | 73 or 172 | Security envelope (section 10): ECDSA P-256 signature (64) + certificate digest (8), or + full certificate (107). Can be replaced by a 16-byte MAC on LoRa |
 
 **Send rates**
 
@@ -77,7 +77,7 @@ Every device broadcasts one compact binary RSM. It is 31 bytes before the signat
 
 Encoding is a fixed binary layout, not JSON, to keep airtime short. Version 0 is frozen once the pilot starts; new fields go in version 1.
 
-**Relay-mutable fields and the radio frame (Step 2).** Relays change only hop\_count, ttl and origin\_pos\_age. The originator signs the body with those three fields set to zero, so the signature still verifies after relaying while any other change breaks it. The radio frame around the RSM carries the last relay's position (needed for the distance back-off in section 5); it is outside the signature, like the ETSI GeoNetworking forwarding header. The certificate digest and signature format are fixed in Step 3.
+**Relay-mutable fields and the radio frame (Step 2).** Relays change only hop\_count, ttl and origin\_pos\_age. The originator signs the body with those three fields set to zero, so the signature still verifies after relaying while any other change breaks it. The radio frame around the RSM carries the last relay's position (needed for the distance back-off in section 5); it is outside the signature, like the ETSI GeoNetworking forwarding header. The security envelope (Step 3) follows the body in the frame's auth field, at most 176 bytes; a whole frame is at most 218 bytes and fits one Bluetooth LE extended advertisement.
 
 **Event messages (Step 2).** A hard-brake event is sent as soon as deceleration reaches 4 m/s² and repeated on the next 3 messages. A vehicle stopped for 5 s away from a junction sends a stopped-traffic event (code 5) once a second. Events use TTL 5, so a queue in fog or around a bend is announced well beyond one radio hop.
 
@@ -239,9 +239,13 @@ A fake "hard braking" message could cause a crash, and position data could be us
 
 **Message authenticity**
 
-- Each install generates an ECDSA P-256 key pair in the phone's secure hardware (Secure Enclave / Android Keystore).
-- The RoadMesh server issues a batch of 20 short-lived pseudonym certificates per device per week. The server knows the device; peers see only rotating pseudonyms.
-- Every RSM is signed with the current pseudonym key. On busy channels (over 40 peers), receivers verify event messages always and heartbeats by sampling 1 in 4. This is the standard trade-off between CPU load and trust.
+- Each install generates an ECDSA P-256 *device key* in the phone's secure hardware (Secure Enclave / Android Keystore, StrongBox where available). It identifies the install to the server only and is never broadcast.
+- Each pseudonym has its own key pair, also generated in secure hardware; a shared key would make the pseudonyms linkable. The phone sends the 20 public keys, signed by the device key and with App Attest / Play Integrity evidence, and the server issues at most 20 pseudonym certificates per device in any rolling 7 days, each valid for one week. The server knows the device; peers see only rotating pseudonyms.
+- **Certificate (107 bytes):** version, CA key id, valid from, valid until (Unix seconds), compressed public key (33), CA signature (64). The temp\_id is the first 4 bytes of SHA-256 over the certificate, so a pseudonym belongs to exactly one certificate.
+- Every RSM is signed with the current pseudonym key. The signature also covers the sender's Unix hour (the body carries only ms since the hour), so a recorded message cannot be replayed an hour or a week later.
+- **Security envelope:** most messages carry the signature and an 8-byte certificate digest (73 bytes). The full certificate (172 bytes) is attached at least once a second, on every event message, and for 2 s after each pseudonym change. A phone that hears a new vehicle can trust it within 1 s. Receivers cache verified certificates until they expire.
+- **Verification (v1):** every message is verified. Sampling heartbeats 1 in 4 on busy channels (over 40 peers) exists as a setting, off by default; it is decided in Step 5 with CPU measurements from real phones. Copies of a message already verified (relays) are dropped before the signature check.
+- **Revocation list:** the CA signs a list with a serial number, issue time, next-update time and the sorted 8-byte digests of revoked certificates that have not yet expired. Phones refresh it daily and on each connection, and never accept a list with a lower serial. (Chosen over a compact filter: exact, and small because certificates expire within a week.)
 - On LoRa, the signature is replaced by a 16-byte MAC under a rotating group key, because full signatures cost too much airtime.
 
 **Misbehaviour detection.** Reject and report a message when any of these hold:
@@ -251,7 +255,7 @@ A fake "hard braking" message could cause a crash, and position data could be us
 - Claimed position not on or near a road
 - The sender claims to be within 30 m but its signal strength is impossible for that distance
 
-The server revokes the certificates of devices with repeated reports.
+The reporting phone blocks the sender locally at once and sends the server a report signed with its own pseudonym key, carrying the offending signed messages as evidence. The server re-checks the signatures and the evidence, and revokes **all** certificates of a device once 3 different devices have filed confirmed reports (several pseudonyms of one phone count once). A revoked device gets no new certificates. Each device may file at most 50 reports a day. The "not near a road" check arrives with map matching (Step 4) and the signal-strength check with the Bluetooth transport (Step 5).
 
 **Privacy rules**
 
