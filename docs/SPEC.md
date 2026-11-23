@@ -45,7 +45,7 @@ The safety core is one shared library. The same code runs on iPhone, Android and
 
 ## 3. RoadMesh Safety Message (RSM)
 
-Every device broadcasts one compact binary RSM. It fits in about 48 bytes before the signature, so it travels in one Bluetooth LE extended advertisement or one LoRa packet. The field set follows SAE J2735's Basic Safety Message, reduced to what a phone can measure.
+Every device broadcasts one compact binary RSM. It is 31 bytes before the signature (the fields below), so it travels in one Bluetooth LE extended advertisement or one LoRa packet. The field set follows SAE J2735's Basic Safety Message, reduced to what a phone can measure.
 
 | Field | Type | Bytes | Notes |
 | --- | --- | --- | --- |
@@ -63,7 +63,7 @@ Every device broadcasts one compact binary RSM. It fits in about 48 bytes before
 | pos\_accuracy | uint8 | 1 | Estimated horizontal error in 0.25 m units |
 | hop\_count + ttl | uint8 | 1 | 4 bits each (section 5) |
 | origin\_pos\_age | uint16 | 2 | ms since the origin sent it (relayed messages only) |
-| event\_code | uint8 | 1 | Event messages only: crash, hard brake, wrong-way, hazard |
+| event\_code | uint8 | 1 | Event messages only: 1 crash, 2 hard brake, 3 wrong-way, 4 hazard, 5 stopped traffic (0 = none) |
 | signature | bytes | 64 | ECDSA P-256 (section 10). Can be truncated to a 16-byte MAC on LoRa |
 
 **Send rates**
@@ -76,6 +76,10 @@ Every device broadcasts one compact binary RSM. It fits in about 48 bytes before
 | Event (hard brake, crash) | Immediately, 3 repeats within 300 ms |
 
 Encoding is a fixed binary layout, not JSON, to keep airtime short. Version 0 is frozen once the pilot starts; new fields go in version 1.
+
+**Relay-mutable fields and the radio frame (Step 2).** Relays change only hop\_count, ttl and origin\_pos\_age. The originator signs the body with those three fields set to zero, so the signature still verifies after relaying while any other change breaks it. The radio frame around the RSM carries the last relay's position (needed for the distance back-off in section 5); it is outside the signature, like the ETSI GeoNetworking forwarding header. The certificate digest and signature format are fixed in Step 3.
+
+**Event messages (Step 2).** A hard-brake event is sent as soon as deceleration reaches 4 m/s² and repeated on the next 3 messages. A vehicle stopped for 5 s away from a junction sends a stopped-traffic event (code 5) once a second. Events use TTL 5, so a queue in fog or around a bend is announced well beyond one radio hop.
 
 ## 4. Radio and transport layer
 
@@ -137,7 +141,9 @@ Each phone keeps a Local Dynamic Map (LDM): a small live table of every peer it 
 
 **Prediction.** Every 100 ms, project each track and the user 6 s ahead in 100 ms steps. Two tracks conflict when their predicted positions come within a conflict radius at the same step. The radius is 2.5 m plus both position uncertainties, so noisy GPS widens the radius rather than causing false certainty.
 
-**Confidence gate.** No alert is raised from a track with map-match confidence under 0.7 or position accuracy worse than 8 m. Such tracks still appear on the map as faded icons.
+*Implementation note (Step 2).* The core predicts vehicle outlines (rotated rectangles), not points. Each outline is lengthened at both ends by that vehicle's reported position accuracy. It is not widened sideways: on a two-lane road the lanes are only 3.5 m apart, and sideways widening made every oncoming vehicle a false conflict. Separating adjacent lanes is the job of map matching (Step 4).
+
+**Confidence gate.** No Warning or Danger alert is raised from a track with map-match confidence under 0.7 or position accuracy worse than 8 m. Such tracks still appear on the map as faded icons. If such a track is on a collision course, the driver gets a Caution "possible conflict, ease off" so they are never left without a hint (decision of 2026-11-23); it never becomes Danger, so it cannot cause false emergency alarms.
 
 ## 7. Behaviour detection and scoring
 
@@ -173,6 +179,19 @@ Only one alert shows at a time: the highest-priority active one. Each alert has 
 | 3 | Overtaking you | Peer overtaking flag set, within 25 m beside or behind | Peer 10 m ahead or flag cleared | Warning |
 | 4 | Fast approach from behind | Same lane, 0 to 80 m behind, closing faster than 5 m/s (18 km/h) | Closing speed under 2 m/s | Warning |
 | 5 | Own speeding | Above limit + 5 km/h | At or below the limit | Warning |
+
+**Additions (Step 2).** These alerts come from the prediction and right-of-way engine and sit between priorities 1 and 2:
+
+| Alert | Enter when | Exit when | Level |
+| --- | --- | --- | --- |
+| Lost contact | The vehicle I am giving way to stops being heard | It is heard again and has passed, or 3 s with no conflict | Danger (fail-safe: keep slowing) |
+| Not yielding | A vehicle that must give way is on a collision course within 2 s and is not slowing | Conflict gone | Danger, for the vehicle with priority |
+| Vehicle ahead / oncoming | Predicted collision within 4 s with a slow or stopped vehicle ahead, or an oncoming one | The vehicle has cleared | Danger |
+| Hazard ahead (stopped traffic) | Stopped vehicle in my lane ahead, heard directly or relayed (up to 3 km) | Gone, or 8 s after the last report | Warning |
+
+"Hard braking ahead" is not shown separately for a vehicle that already has one of these Danger alerts.
+
+**Driver instruction.** Every Danger and Warning alert carries an instruction worked out from the gentlest deceleration that avoids the conflict: *Ease off*, *Brake gently* (up to 2 m/s²), *Brake firmly* (up to 4.5 m/s²) or *Brake hard now*. The app shows and speaks it. It is advice for the driver; the app never brakes (section 1, non-goals).
 
 **Right of way.** For a crossing conflict, the vehicle that must yield gets the Danger alert. Yield follows the road hierarchy (minor road yields to major road), then traffic from the right. The vehicle with priority gets a Caution alert. This avoids the symmetric deadlock found in the prototype, where both sides braked for each other.
 

@@ -196,6 +196,9 @@ struct PairState {
     tail_since: Option<f64>,
     tail_flag: bool,
     follower: Option<Subject>,
+    /// A pass seen at the crossing, counted once the passer is `overtake_complete_m`
+    /// ahead: (passer, passed, oncoming lane, km/h, +1 if the passer is `a` else −1).
+    pending: Option<(Subject, Subject, bool, f64, f64)>,
 }
 
 /// The recorder.
@@ -432,6 +435,44 @@ impl BehaviorMonitor {
         self.cars.insert(who, st);
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn count_overtake(
+        &mut self,
+        cfg: &Config,
+        now: f64,
+        passer: Subject,
+        passed: Subject,
+        left: bool,
+        kmh: f64,
+    ) {
+        if let Some(p) = self.profiles.get_mut(&passer) {
+            p.overtakes += 1;
+            if left {
+                p.oncoming_overtakes += 1;
+            }
+        }
+        if let Some(p) = self.profiles.get_mut(&passed) {
+            p.overtaken += 1;
+        }
+        self.penalise(
+            passer,
+            if left {
+                cfg.penalty_overtake_risky
+            } else {
+                cfg.penalty_overtake
+            },
+        );
+        self.event(
+            now,
+            passer,
+            EventKind::Overtake {
+                kmh,
+                oncoming: left,
+                other: passed,
+            },
+        );
+    }
+
     fn pair(&mut self, cfg: &Config, now: f64, dt: f64, a: &Observation, b: &Observation) {
         let key = (a.who, b.who);
         let (am, bm) = (&a.motion, &b.motion);
@@ -452,6 +493,7 @@ impl BehaviorMonitor {
             tail_since: None,
             tail_flag: false,
             follower: None,
+            pending: None,
         });
         if now - st.t > 0.5 {
             st.max_lat = 0.0; // gap in observation: restart the pass tracking
@@ -475,37 +517,22 @@ impl BehaviorMonitor {
                 } else {
                     lateral < 0.0
                 };
-                if let Some(p) = self.profiles.get_mut(&passer) {
-                    p.overtakes += 1;
-                    if left {
-                        p.oncoming_overtakes += 1;
-                    }
-                }
-                if let Some(p) = self.profiles.get_mut(&passed) {
-                    p.overtaken += 1;
-                }
-                self.penalise(
-                    passer,
-                    if left {
-                        cfg.penalty_overtake_risky
-                    } else {
-                        cfg.penalty_overtake
-                    },
-                );
-                self.event(
-                    now,
-                    passer,
-                    EventKind::Overtake {
-                        kmh: pm.speed * 3.6,
-                        oncoming: left,
-                        other: passed,
-                    },
-                );
+                let sign = if passer == a.who { 1.0 } else { -1.0 };
+                st.pending = Some((passer, passed, left, pm.speed * 3.6, sign));
             }
             st.max_lat = 0.0;
         }
         st.along = along;
         st.t = now;
+        // count the pass once the passer is clear ahead (immediately in the reference profile)
+        if let Some((passer, passed, left, kmh, sign)) = st.pending {
+            if sign * along >= cfg.overtake_complete_m {
+                st.pending = None;
+                self.count_overtake(cfg, now, passer, passed, left, kmh);
+            } else if sign * along < 0.0 {
+                st.pending = None; // fell back: not an overtake
+            }
+        }
 
         // tailgating: same lane, the one behind closer than the headway
         if lateral.abs() < 1.5 {
@@ -706,6 +733,169 @@ mod tests {
                 }
             )));
         assert!(mon.profiles()[&p1].tailgate_s > 1.5);
+    }
+
+    #[test]
+    fn spec_overtake_counts_only_once_10_m_clear() {
+        let cfg = Config::spec_v0();
+        let mut mon = BehaviorMonitor::new();
+        let p1 = Subject::Peer(*b"p1p1");
+        let mut counted_at = None;
+        for i in 0..100 {
+            let t = f64::from(i) * 0.1;
+            let me = obs(Subject::Me, t, 20.0 * t, -1.75, 20.0, 0.0);
+            let peer = obs(p1, t, -40.0 + 28.0 * t, 1.75, 28.0, 0.0);
+            mon.observe(&cfg, t, 0.1, me, &[peer], &NoLimits);
+            if counted_at.is_none() && mon.profiles()[&p1].overtakes == 1 {
+                counted_at = Some(8.0 * t - 40.0); // how far ahead the peer was
+            }
+        }
+        assert!(
+            counted_at.is_some_and(|d| (10.0..11.0).contains(&d)),
+            "{counted_at:?}"
+        );
+        assert_eq!(mon.profiles()[&p1].oncoming_overtakes, 1);
+        assert_eq!(mon.profiles()[&p1].score(&cfg), 96); // -4: oncoming lane
+    }
+
+    #[test]
+    fn spec_speeding_needs_10_kmh_for_3_s_and_ends_below_limit_plus_5() {
+        let cfg = Config::spec_v0();
+        let limit = 50.0 / 3.6;
+        let mut mon = BehaviorMonitor::new();
+        let p1 = Subject::Peer(*b"p1p1");
+        let me = |t| obs(Subject::Me, t, 0.0, 0.0, 0.0, 0.0);
+        // 58 km/h: over the limit but not by 10 km/h -> nothing
+        for i in 0..50 {
+            let t = f64::from(i) * 0.1;
+            mon.observe(
+                &cfg,
+                t,
+                0.1,
+                me(t),
+                &[obs(p1, t, 0.0, 0.0, 58.0 / 3.6, 0.0)],
+                &Fixed(limit),
+            );
+        }
+        assert_eq!(mon.profiles()[&p1].speeding_episodes, 0);
+        // 62 km/h for 3 s -> one episode, penalty 6
+        for i in 50..90 {
+            let t = f64::from(i) * 0.1;
+            mon.observe(
+                &cfg,
+                t,
+                0.1,
+                me(t),
+                &[obs(p1, t, 0.0, 0.0, 62.0 / 3.6, 0.0)],
+                &Fixed(limit),
+            );
+        }
+        assert_eq!(mon.profiles()[&p1].speeding_episodes, 1);
+        assert_eq!(mon.profiles()[&p1].score(&cfg), 94);
+        // 56 km/h: still above limit + 5 -> same episode continues (hysteresis)
+        for i in 90..110 {
+            let t = f64::from(i) * 0.1;
+            mon.observe(
+                &cfg,
+                t,
+                0.1,
+                me(t),
+                &[obs(p1, t, 0.0, 0.0, 56.0 / 3.6, 0.0)],
+                &Fixed(limit),
+            );
+        }
+        assert!(
+            !mon.events()
+                .iter()
+                .any(|e| matches!(e.kind, EventKind::SpeedingEnd { .. }))
+        );
+        // 54 km/h: below limit + 5 -> episode ends
+        mon.observe(
+            &cfg,
+            11.0,
+            0.1,
+            me(11.0),
+            &[obs(p1, 11.0, 0.0, 0.0, 54.0 / 3.6, 0.0)],
+            &Fixed(limit),
+        );
+        assert!(
+            mon.events()
+                .iter()
+                .any(|e| matches!(e.kind, EventKind::SpeedingEnd { .. }))
+        );
+    }
+
+    #[test]
+    fn spec_harsh_thresholds_and_once_per_episode() {
+        let cfg = Config::spec_v0();
+        let mut mon = BehaviorMonitor::new();
+        let p1 = Subject::Peer(*b"p1p1");
+        let me = |t| obs(Subject::Me, t, 0.0, 0.0, 0.0, 0.0);
+        let decels = [-4.0, -4.6, -4.8, -3.0, -4.6, -1.0, -4.6]; // 4.0 is below 4.5; -3.0 does not end the episode
+        for (i, a) in decels.iter().enumerate() {
+            let t = i as f64 * 0.1;
+            mon.observe(
+                &cfg,
+                t,
+                0.1,
+                me(t),
+                &[obs(p1, t, 0.0, 0.0, 10.0, *a)],
+                &NoLimits,
+            );
+        }
+        assert_eq!(mon.profiles()[&p1].harsh_brakes, 2);
+        // motorbikes: 3.2 m/s² is harsh for a car, not for a motorbike
+        let mut mon = BehaviorMonitor::new();
+        let mut bike = obs(p1, 0.0, 0.0, 0.0, 10.0, 3.2);
+        bike.vehicle_type = VehicleType::Motorbike;
+        mon.observe(&cfg, 0.0, 0.1, me(0.0), &[bike], &NoLimits);
+        assert_eq!(mon.profiles()[&p1].harsh_accels, 0);
+        let car = obs(Subject::Peer(*b"c1c1"), 0.0, 50.0, 0.0, 10.0, 3.2);
+        mon.observe(&cfg, 0.1, 0.1, me(0.1), &[car], &NoLimits);
+        assert_eq!(mon.profiles()[&Subject::Peer(*b"c1c1")].harsh_accels, 1);
+    }
+
+    #[test]
+    fn spec_score_recovers_1_2_points_per_clean_minute_and_caps_at_100() {
+        let cfg = Config::spec_v0();
+        let mut mon = BehaviorMonitor::new();
+        let me = |t, a| obs(Subject::Me, t, 0.0, 0.0, 10.0, a);
+        mon.observe(&cfg, 0.0, 0.1, me(0.0, -5.0), &[], &NoLimits); // harsh brake: -5
+        assert_eq!(mon.profiles()[&Subject::Me].score(&cfg), 95);
+        let mut t = 0.0;
+        for _ in 0..600 {
+            t += 0.1;
+            mon.observe(&cfg, t, 0.1, me(t, 0.0), &[], &NoLimits);
+        }
+        let s = mon.profiles()[&Subject::Me].episode_score;
+        assert!((s - 96.2).abs() < 0.05, "{s}"); // one clean minute: +1.2
+        for _ in 0..6000 {
+            t += 0.1;
+            mon.observe(&cfg, t, 0.1, me(t, 0.0), &[], &NoLimits);
+        }
+        assert_eq!(mon.profiles()[&Subject::Me].score(&cfg), 100);
+    }
+
+    #[test]
+    fn spec_peer_records_are_deleted_after_expiry_plus_10_minutes() {
+        let cfg = Config::spec_v0();
+        let mut mon = BehaviorMonitor::new();
+        let p1 = Subject::Peer(*b"p1p1");
+        let me = |t| obs(Subject::Me, t, 0.0, 0.0, 0.0, 0.0);
+        mon.observe(
+            &cfg,
+            0.0,
+            0.1,
+            me(0.0),
+            &[obs(p1, 0.0, 10.0, 0.0, 10.0, -6.0)],
+            &NoLimits,
+        );
+        assert!(mon.profiles().contains_key(&p1));
+        mon.observe(&cfg, 600.0, 0.1, me(600.0), &[], &NoLimits);
+        assert!(mon.profiles().contains_key(&p1)); // 2 s expiry + 600 s not yet over
+        mon.observe(&cfg, 603.0, 0.1, me(603.0), &[], &NoLimits);
+        assert!(!mon.profiles().contains_key(&p1));
+        assert!(mon.events().iter().all(|e| e.who != p1)); // its events are gone too
     }
 
     #[test]

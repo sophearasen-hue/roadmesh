@@ -7,7 +7,7 @@
 //! the gentlest deceleration that would avoid the conflict, as information for
 //! the display and voice. Only the simulator's test driver follows that number.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::auth::{AuthError, Signer, Verifier};
 use crate::behavior::{BehaviorMonitor, Observation, SpeedLimits, Subject};
@@ -207,6 +207,18 @@ struct Threat {
     ttc: f64,
     msg: PeerMsg,
     traj: Vec<Pose>,
+    /// Outline inflation for this pair (safety margin + position uncertainty).
+    margin: f64,
+}
+
+/// Hysteresis state of the SPEC §8 alerts.
+#[derive(Debug, Clone, Default)]
+struct AlertState {
+    crossing: HashSet<TempId>,
+    hard_brake: HashMap<TempId, Option<f64>>, // peer -> when it calmed down
+    overtaking_you: HashSet<TempId>,
+    approach: HashSet<TempId>,
+    own_speeding: bool,
 }
 
 /// The safety engine of one phone.
@@ -225,6 +237,12 @@ pub struct Obu {
     yield_to: Option<TempId>,
     hazard_mem: Option<(f64, PeerMsg, u8)>,
     behavior: BehaviorMonitor,
+    alert_state: AlertState,
+    stopped_since: Option<f64>,
+    last_stop_event: f64,
+    hard_brake_repeats: u8,
+    in_hard_brake: bool,
+    own_overtaking: bool,
 }
 
 /// Relation of `other` to my path (reference `relation`).
@@ -245,6 +263,35 @@ pub fn relation(me: &Motion, other: &Motion) -> Relation {
     }
 }
 
+/// Inputs of the SPEC §8 alert rules for one cycle.
+struct SpecCtx<'a> {
+    own: &'a OwnState,
+    road: &'a RoadContext,
+    fresh: &'a [PeerMsg],
+    trajs: &'a [(TempId, Vec<Pose>)],
+    threats: &'a [Threat],
+    low: &'a [(f64, PeerMsg)],
+    hazard: Option<&'a (f64, PeerMsg, u8)>,
+    lost_target: bool,
+    hz_cap: Option<f64>,
+}
+
+/// Where two straight paths cross: distance along each heading to the crossing
+/// point (negative = already past it). `None` for near-parallel paths.
+pub fn path_crossing(a: &Motion, b: &Motion) -> Option<(f64, f64)> {
+    let (da, db) = (
+        (a.heading.cos(), a.heading.sin()),
+        (b.heading.cos(), b.heading.sin()),
+    );
+    let cross = |u: (f64, f64), v: (f64, f64)| u.0 * v.1 - u.1 * v.0;
+    let denom = cross(da, db);
+    if denom.abs() < 0.2 {
+        return None;
+    }
+    let r = (b.x - a.x, b.y - a.y);
+    Some((cross(r, db) / denom, cross(r, da) / denom))
+}
+
 impl Obu {
     /// New engine. `relay` enables store-and-forward of other phones' messages.
     pub fn new(cfg: Config, origin: GeoOrigin, relay: bool) -> Self {
@@ -262,6 +309,12 @@ impl Obu {
             yield_to: None,
             hazard_mem: None,
             behavior: BehaviorMonitor::new(),
+            alert_state: AlertState::default(),
+            stopped_since: None,
+            last_stop_event: f64::NEG_INFINITY,
+            hard_brake_repeats: 0,
+            in_hard_brake: false,
+            own_overtaking: false,
         }
     }
 
@@ -298,16 +351,65 @@ impl Obu {
     // ------------------------------------------------------------ transmit
 
     /// Frames to broadcast now: queued relays (heard last cycle, 100 ms per hop),
-    /// then this phone's own signed message.
-    pub fn transmit(&mut self, now: f64, own: &OwnState, signer: &mut dyn Signer) -> Vec<Frame> {
+    /// then this phone's own signed message: a heartbeat, or an event message
+    /// (hard brake: immediately, repeated; stopped traffic: once a second).
+    pub fn transmit(
+        &mut self,
+        now: f64,
+        own: &OwnState,
+        road: &RoadContext,
+        signer: &mut dyn Signer,
+    ) -> Vec<Frame> {
         let mut out = std::mem::take(&mut self.outbox);
         let temp_id = signer.current_temp_id(now);
         self.own_ids.insert(temp_id);
         self.msg_id = self.msg_id.wrapping_add(1);
         let m = &own.motion;
+        let c = &self.cfg;
+        // hard braking: an event on entry, repeated `event_repeats` times
+        if m.accel <= -c.hard_brake_ahead_decel {
+            if !self.in_hard_brake {
+                self.in_hard_brake = true;
+                self.hard_brake_repeats = c.event_repeats;
+            }
+        } else if m.accel > -c.hard_brake_exit_decel {
+            self.in_hard_brake = false;
+        }
+        // stopped on a travel lane (not at a junction): stopped-traffic event at 1 Hz
+        if m.speed < 0.5 {
+            self.stopped_since.get_or_insert(now);
+        } else {
+            self.stopped_since = None;
+        }
+        let event = if self.hard_brake_repeats > 0 {
+            self.hard_brake_repeats -= 1;
+            EventCode::HardBrake
+        } else if self
+            .stopped_since
+            .is_some_and(|s| now - s >= c.stopped_event_after_s - 1e-9)
+            && !road.at_junction
+            && now - self.last_stop_event >= c.stopped_event_interval_s - 1e-9
+        {
+            self.last_stop_event = now;
+            EventCode::StoppedTraffic
+        } else {
+            EventCode::None
+        };
+        let is_event = event != EventCode::None;
+        let mut fl = 0;
+        if m.accel <= -c.hard_brake_ahead_decel {
+            fl |= flags::HARD_BRAKE;
+        }
+        if self.own_overtaking {
+            fl |= flags::OVERTAKING;
+        }
         let (lat, lon) = self.origin.to_latlon(m.x, m.y);
         let r = Rsm {
-            msg_type: MsgType::Heartbeat,
+            msg_type: if is_event {
+                MsgType::Event
+            } else {
+                MsgType::Heartbeat
+            },
             temp_id,
             msg_id: self.msg_id,
             timestamp_ms: rsm::ms_of_hour(now),
@@ -318,16 +420,16 @@ impl Obu {
             accel: m.accel,
             yaw_rate: m.yaw_rate,
             vehicle_type: own.vehicle_type,
-            flags: if m.accel <= -self.cfg.hard_brake_ahead_decel {
-                flags::HARD_BRAKE
-            } else {
-                0
-            },
+            flags: fl,
             pos_accuracy_m: own.pos_accuracy_m,
             hop_count: 0,
-            ttl: self.cfg.heartbeat_ttl,
+            ttl: if is_event {
+                c.event_ttl
+            } else {
+                c.heartbeat_ttl
+            },
             origin_pos_age_ms: 0,
-            event: EventCode::None,
+            event,
         };
         let body = r.encode();
         let auth = signer.sign(&temp_id, &rsm::signing_bytes(&body));
@@ -453,6 +555,27 @@ impl Obu {
         toward_me < 0.0 && dx.hypot(dy) > other.length + 2.0
     }
 
+    fn margin_for(&self, _own: &OwnState, _m: &PeerMsg) -> f64 {
+        self.cfg.safety_margin_m
+    }
+
+    /// Own outline for prediction, lengthened by the position uncertainty (SPEC §6).
+    fn own_dims(&self, own: &OwnState) -> (f64, f64) {
+        let (l, w) = own.dims();
+        (
+            l + 2.0 * self.cfg.uncertainty_margin_factor * own.pos_accuracy_m,
+            w,
+        )
+    }
+
+    /// A peer's outline for prediction, lengthened by its reported position uncertainty.
+    fn peer_dims(&self, m: &PeerMsg) -> (f64, f64) {
+        (
+            m.length + 2.0 * self.cfg.uncertainty_margin_factor * m.pos_accuracy_m,
+            m.width,
+        )
+    }
+
     fn target_cleared(&self, own: &OwnState, target: &PeerMsg, target_traj: &[Pose]) -> bool {
         let me = &own.motion;
         if relation(me, &target.motion) == Relation::Crossing {
@@ -469,10 +592,10 @@ impl Obu {
         );
         first_conflict(
             &ego,
-            own.dims(),
+            self.own_dims(own),
             target_traj,
-            (target.length, target.width),
-            self.cfg.safety_margin_m,
+            self.peer_dims(target),
+            self.margin_for(own, target),
             0.0,
             self.cfg.pred_step_s,
         )
@@ -494,10 +617,10 @@ impl Obu {
             if avoid.iter().all(|th| {
                 first_conflict(
                     &ego,
-                    own.dims(),
+                    self.own_dims(own),
                     &th.traj,
-                    (th.msg.length, th.msg.width),
-                    c.safety_margin_m,
+                    self.peer_dims(&th.msg),
+                    th.margin,
                     c.yield_pet_s,
                     c.pred_step_s,
                 )
@@ -580,7 +703,7 @@ impl Obu {
         now: f64,
         dt: f64,
         own: &OwnState,
-        _road: &RoadContext,
+        road: &RoadContext,
         limits: &dyn SpeedLimits,
     ) -> Decision {
         let c = self.cfg.clone();
@@ -592,13 +715,19 @@ impl Obu {
         let fresh_ms = (c.safety_max_age_s * 1000.0).round() as i64;
 
         // Collision avoidance: only fresh data about vehicles close enough to matter.
+        // SPEC §6 confidence gate: imprecise tracks never raise Warning/Danger.
         let mut fresh: Vec<PeerMsg> = Vec::new();
+        let mut low_conf: Vec<PeerMsg> = Vec::new();
         for e in self.ldm.entries() {
             let m = &e.msg;
             if now_ms - m.t_ms <= fresh_ms
                 && (m.motion.x - me.x).hypot(m.motion.y - me.y) <= c.safety_range_m
             {
-                fresh.push(*m);
+                if m.pos_accuracy_m > c.max_alert_pos_accuracy_m {
+                    low_conf.push(*m);
+                } else {
+                    fresh.push(*m);
+                }
             }
         }
         let mut threats: Vec<Threat> = Vec::new();
@@ -606,12 +735,13 @@ impl Obu {
         let mut eebl: Option<(f64, PeerMsg)> = None;
         for m in &fresh {
             let tr = trajectory(m.motion, c.horizon_s, c.pred_step_s, (now - m.t).max(0.0));
+            let margin = self.margin_for(own, m);
             if let Some(ttc) = first_conflict(
                 &ego_const,
-                dims,
+                self.own_dims(own),
                 &tr,
-                (m.length, m.width),
-                c.safety_margin_m,
+                self.peer_dims(m),
+                margin,
                 0.0,
                 c.pred_step_s,
             ) && ttc < c.ttc_warn_s
@@ -620,6 +750,7 @@ impl Obu {
                     ttc,
                     msg: *m,
                     traj: tr.clone(),
+                    margin,
                 });
             }
             if m.motion.accel <= -c.hard_brake_ahead_decel
@@ -704,6 +835,7 @@ impl Obu {
                 ttc: f64::INFINITY,
                 msg: m,
                 traj: tr,
+                margin: self.margin_for(own, &m),
             };
             avoid.push(&held_target);
         }
@@ -759,15 +891,51 @@ impl Obu {
             .collect();
         self.behavior.observe(&c, now, dt, me_obs, &peers, limits);
 
-        let alerts = self.reference_alerts(
-            &me,
-            &threats,
-            hazard.as_ref(),
-            eebl.as_ref(),
-            lost_target,
-            cap,
-            hz_cap,
-        );
+        let alerts = if c.spec_alerts {
+            let low: Vec<(f64, PeerMsg)> = low_conf
+                .iter()
+                .filter_map(|m| {
+                    let tr = trajectory(m.motion, c.horizon_s, c.pred_step_s, (now - m.t).max(0.0));
+                    first_conflict(
+                        &ego_const,
+                        self.own_dims(own),
+                        &tr,
+                        self.peer_dims(m),
+                        self.margin_for(own, m),
+                        0.0,
+                        c.pred_step_s,
+                    )
+                    .filter(|&t| t < c.ttc_warn_s)
+                    .map(|t| (t, *m))
+                })
+                .collect();
+            let ctx = SpecCtx {
+                own,
+                road,
+                fresh: &fresh,
+                trajs: &trajs,
+                threats: &threats,
+                low: &low,
+                hazard: hazard.as_ref(),
+                lost_target,
+                hz_cap,
+            };
+            let (alerts, extra) = self.spec_alerts(now, &ctx, cap);
+            if let Some(x) = extra {
+                cap = Some(cap.map_or(x, |v| v.min(x)));
+            }
+            alerts
+        } else {
+            self.reference_alerts(
+                &me,
+                &threats,
+                hazard.as_ref(),
+                eebl.as_ref(),
+                lost_target,
+                cap,
+                hz_cap,
+            )
+        };
         Decision {
             alerts,
             state: self.state,
@@ -775,6 +943,405 @@ impl Obu {
             worst_ttc,
             advised_accel: cap,
         }
+    }
+
+    /// Gentlest braking that avoids `m` (advice for a Danger alert about it).
+    fn advice_against(&self, own: &OwnState, m: &PeerMsg, traj: &[Pose]) -> f64 {
+        let th = Threat {
+            ttc: f64::INFINITY,
+            msg: *m,
+            traj: traj.to_vec(),
+            margin: self.margin_for(own, m),
+        };
+        self.gentlest_safe_accel(own, &[&th])
+    }
+
+    fn alert(
+        &self,
+        kind: AlertKind,
+        level: Level,
+        m: Option<(&PeerMsg, u8)>,
+        me: &Motion,
+        accel: Option<f64>,
+    ) -> Alert {
+        let (advised_decel, advice) = self.advice_for(accel);
+        Alert {
+            kind,
+            level,
+            target: m.map(|(m, _)| m.temp_id),
+            ttc_s: None,
+            distance_m: m.map(|(m, _)| (m.motion.x - me.x).hypot(m.motion.y - me.y)),
+            hops: m.map_or(0, |(_, h)| h),
+            relation: m.map(|(m, _)| relation(me, &m.motion)),
+            advised_decel,
+            advice,
+        }
+    }
+
+    /// SPEC §8 alert rules with hysteresis. Returns the alerts (most important first)
+    /// and the advice of any Danger alert not already in `cap`.
+    fn spec_alerts(
+        &mut self,
+        now: f64,
+        x: &SpecCtx<'_>,
+        cap: Option<f64>,
+    ) -> (Vec<Alert>, Option<f64>) {
+        let c = self.cfg.clone();
+        let me = x.own.motion;
+        let (hs, hc) = me.heading.sin_cos();
+        let local = |m: &PeerMsg| {
+            let (dx, dy) = (m.motion.x - me.x, m.motion.y - me.y);
+            (dx * hc + dy * hs, -dx * hs + dy * hc) // (along my heading, to my left)
+        };
+        let traj_of = |id: &TempId| {
+            x.trajs
+                .iter()
+                .find(|(t, _)| t == id)
+                .map(|(_, tr)| tr.as_slice())
+        };
+        let hops_of = |id: &TempId| self.ldm.get(id).map_or(0, |e| e.hops);
+        let mut out: Vec<Alert> = Vec::new();
+        let mut extra: Option<f64> = None;
+        let mut push_extra = |a: f64| extra = Some(extra.map_or(a, |v: f64| v.min(a)));
+
+        // own "overtaking" flag (sent in the next message): I am to the left of a slower
+        // same-direction vehicle within 30 m
+        self.own_overtaking = x.fresh.iter().any(|m| {
+            let (along, lat) = local(m);
+            (m.motion.heading - me.heading).cos() > 0.9
+                && along.abs() < 30.0
+                && lat < -1.5
+                && me.speed > m.motion.speed + 1.0
+        });
+
+        // 0. fail-safe: lost the vehicle I was giving way to
+        if x.lost_target {
+            let mut a = self.alert(
+                AlertKind::LostContact,
+                Level::Danger,
+                None,
+                &me,
+                Some(c.failsafe_brake),
+            );
+            a.target = self.yield_to;
+            out.push(a);
+        }
+
+        // 1. crossing conflict (Danger for the vehicle that must give way, Caution for priority)
+        let mut still = HashSet::new();
+        for m in x.fresh {
+            if relation(&me, &m.motion) != Relation::Crossing {
+                continue;
+            }
+            let id = m.temp_id;
+            let yielding_to_it = self.state == DriveState::Yield && self.yield_to == Some(id);
+            let active = match path_crossing(&me, &m.motion) {
+                Some((s_me, s_o)) => {
+                    let (t_me, t_o) = (s_me / me.speed.max(0.1), s_o / m.motion.speed.max(0.1));
+                    let passed =
+                        s_me < -(x.own.dims().0 / 2.0 + 2.0) || s_o < -(m.length / 2.0 + 2.0);
+                    let gap = (t_me - t_o).abs();
+                    if self.alert_state.crossing.contains(&id) {
+                        !passed && gap <= c.crossing_exit_gap_s
+                    } else {
+                        me.speed > c.crossing_min_speed
+                            && m.motion.speed > c.crossing_min_speed
+                            && (0.0..c.crossing_horizon_s).contains(&t_me)
+                            && (0.0..c.crossing_horizon_s).contains(&t_o)
+                            && gap < c.crossing_enter_gap_s
+                    }
+                }
+                None => false,
+            };
+            if !(active || yielding_to_it) {
+                continue;
+            }
+            still.insert(id);
+            let ttc = x
+                .threats
+                .iter()
+                .find(|t| t.msg.temp_id == id)
+                .map(|t| t.ttc);
+            if self.must_yield(&me, &m.motion) {
+                let adv = if yielding_to_it {
+                    cap
+                } else {
+                    traj_of(&id).map(|tr| self.advice_against(x.own, m, tr))
+                };
+                let adv = Some(adv.unwrap_or(0.0).min(0.0));
+                if let Some(a) = adv {
+                    push_extra(a);
+                }
+                let mut a = self.alert(
+                    AlertKind::CrossingConflict,
+                    Level::Danger,
+                    Some((m, hops_of(&id))),
+                    &me,
+                    adv,
+                );
+                a.ttc_s = ttc;
+                out.push(a);
+            } else if self.state == DriveState::Brake
+                && x.threats.first().is_some_and(|t| t.msg.temp_id == id)
+            {
+                // it should give way but is not doing so, and the conflict is imminent
+                let mut a = self.alert(
+                    AlertKind::NotYielding,
+                    Level::Danger,
+                    Some((m, hops_of(&id))),
+                    &me,
+                    cap,
+                );
+                a.ttc_s = ttc;
+                out.push(a);
+            } else {
+                let mut a = self.alert(
+                    AlertKind::PriorityConflict,
+                    Level::Caution,
+                    Some((m, hops_of(&id))),
+                    &me,
+                    None,
+                );
+                a.ttc_s = ttc;
+                out.push(a);
+            }
+        }
+        self.alert_state.crossing = still;
+
+        // 2. hard braking ahead (same road and direction, 0–200 m)
+        let mut hb = HashMap::new();
+        for m in x.fresh {
+            let (along, lat) = local(m);
+            if relation(&me, &m.motion) != Relation::Ahead
+                || lat.abs() >= 3.0
+                || along > c.hard_brake_ahead_range_m
+            {
+                continue;
+            }
+            let id = m.temp_id;
+            let hard =
+                -m.motion.accel >= c.hard_brake_ahead_decel || m.flags & flags::HARD_BRAKE != 0;
+            let keep = match self.alert_state.hard_brake.get(&id) {
+                _ if hard => Some(None),
+                None => None,
+                Some(calm) => {
+                    if -m.motion.accel < c.hard_brake_exit_decel {
+                        let since = calm.unwrap_or(now);
+                        if now - since >= c.hard_brake_exit_hold_s - 1e-9 {
+                            None
+                        } else {
+                            Some(Some(since))
+                        }
+                    } else {
+                        Some(None)
+                    }
+                }
+            };
+            if let Some(state) = keep {
+                hb.insert(id, state);
+                let adv = traj_of(&id)
+                    .map(|tr| self.advice_against(x.own, m, tr))
+                    .unwrap_or(0.0)
+                    .min(0.0);
+                push_extra(adv);
+                out.push(self.alert(
+                    AlertKind::HardBrakingAhead,
+                    Level::Danger,
+                    Some((m, hops_of(&id))),
+                    &me,
+                    Some(adv),
+                ));
+            }
+        }
+        self.alert_state.hard_brake = hb;
+
+        // 2b. vehicle ahead / oncoming / not yielding, from the right-of-way engine
+        if !x.lost_target {
+            match self.state {
+                DriveState::Yield => {
+                    if let Some(id) = self.yield_to
+                        && let Some(m) = x.fresh.iter().find(|m| m.temp_id == id)
+                    {
+                        let kind = match relation(&me, &m.motion) {
+                            Relation::Ahead => Some(AlertKind::VehicleAhead),
+                            Relation::Oncoming => Some(AlertKind::Oncoming),
+                            _ => None, // crossing: already covered by rule 1
+                        };
+                        if let Some(kind) = kind {
+                            let mut a = self.alert(
+                                kind,
+                                Level::Danger,
+                                Some((m, hops_of(&id))),
+                                &me,
+                                Some(cap.unwrap_or(0.0).min(0.0)),
+                            );
+                            a.ttc_s = x
+                                .threats
+                                .iter()
+                                .find(|t| t.msg.temp_id == id)
+                                .map(|t| t.ttc);
+                            out.push(a);
+                        }
+                    }
+                }
+                DriveState::Brake => {
+                    if let Some(th) = x.threats.first()
+                        && relation(&me, &th.msg.motion) != Relation::Crossing
+                    {
+                        let mut a = self.alert(
+                            AlertKind::NotYielding,
+                            Level::Danger,
+                            Some((&th.msg, hops_of(&th.msg.temp_id))),
+                            &me,
+                            cap,
+                        );
+                        a.ttc_s = Some(th.ttc);
+                        out.push(a);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // 3. stopped traffic ahead (possibly far away, via relays)
+        if let Some((gap, m, hops)) = x.hazard
+            && (me.speed > 1.0 || *gap > 15.0)
+            && !out
+                .iter()
+                .any(|a| a.level == Level::Danger && a.target == Some(m.temp_id))
+        {
+            let mut a = self.alert(
+                AlertKind::HazardAhead,
+                Level::Warning,
+                Some((m, *hops)),
+                &me,
+                Some(x.hz_cap.unwrap_or(0.0)),
+            );
+            a.distance_m = Some(*gap);
+            out.push(a);
+        }
+
+        // 4. a vehicle overtaking me (its "overtaking" flag, within 25 m beside or behind)
+        let mut ov = HashSet::new();
+        for m in x.fresh {
+            if (m.motion.heading - me.heading).cos() < 0.9 {
+                continue;
+            }
+            let (along, lat) = local(m);
+            let flagged = m.flags & flags::OVERTAKING != 0;
+            let active = if self.alert_state.overtaking_you.contains(&m.temp_id) {
+                flagged
+                    && along < c.overtaking_you_exit_ahead_m
+                    && along > -c.overtaking_you_range_m
+            } else {
+                flagged && lat.abs() < 6.0 && along <= 2.0 && along > -c.overtaking_you_range_m
+            };
+            if active {
+                ov.insert(m.temp_id);
+                out.push(self.alert(
+                    AlertKind::OvertakingYou,
+                    Level::Warning,
+                    Some((m, hops_of(&m.temp_id))),
+                    &me,
+                    None,
+                ));
+            }
+        }
+        self.alert_state.overtaking_you = ov;
+
+        // 5. fast approach from behind (same lane, 0–80 m, closing fast)
+        let mut ap = HashSet::new();
+        for m in x.fresh {
+            if relation(&me, &m.motion) != Relation::Behind {
+                continue;
+            }
+            let (along, lat) = local(m);
+            let closing = m.motion.speed - me.speed;
+            let in_zone = lat.abs() < 1.6 && along < 0.0 && -along <= c.approach_behind_range_m;
+            let active = if self.alert_state.approach.contains(&m.temp_id) {
+                in_zone && closing >= c.approach_behind_exit
+            } else {
+                in_zone && closing > c.approach_behind_enter
+            };
+            if active {
+                ap.insert(m.temp_id);
+                out.push(self.alert(
+                    AlertKind::FastApproachBehind,
+                    Level::Warning,
+                    Some((m, hops_of(&m.temp_id))),
+                    &me,
+                    None,
+                ));
+            }
+        }
+        self.alert_state.approach = ap;
+
+        // 6. own speeding
+        if let Some(limit) = x.road.speed_limit {
+            let active = if self.alert_state.own_speeding {
+                me.speed > limit + c.own_speeding_exit
+            } else {
+                me.speed > limit + c.own_speeding_enter
+            };
+            self.alert_state.own_speeding = active;
+            if active {
+                out.push(self.alert(AlertKind::OwnSpeeding, Level::Warning, None, &me, Some(0.0)));
+            }
+        } else {
+            self.alert_state.own_speeding = false;
+        }
+
+        // 7. possible conflict with an imprecise track (Caution only, user decision)
+        if c.low_confidence_caution {
+            for (ttc, m) in x.low {
+                let mut a = self.alert(
+                    AlertKind::PossibleConflict,
+                    Level::Caution,
+                    Some((m, hops_of(&m.temp_id))),
+                    &me,
+                    Some(0.0),
+                );
+                a.ttc_s = Some(*ttc);
+                out.push(a);
+            }
+        }
+
+        // one Danger per vehicle: "hard braking ahead" folds into a stronger alert about it
+        let covered: HashSet<TempId> = out
+            .iter()
+            .filter(|a| a.level == Level::Danger && a.kind != AlertKind::HardBrakingAhead)
+            .filter_map(|a| a.target)
+            .collect();
+        out.retain(|a| {
+            !(a.kind == AlertKind::HardBrakingAhead
+                && a.target.is_some_and(|t| covered.contains(&t)))
+        });
+        // distinct ranks: equal-level alerts never swap places from one cycle to the next
+        let rank = |k: AlertKind| match k {
+            AlertKind::LostContact => 0,
+            AlertKind::CrossingConflict => 1,
+            AlertKind::NotYielding => 2,
+            AlertKind::VehicleAhead => 3,
+            AlertKind::Oncoming => 4,
+            AlertKind::HardBrakingAhead => 5,
+            AlertKind::HazardAhead => 6,
+            AlertKind::OvertakingYou => 7,
+            AlertKind::FastApproachBehind => 8,
+            AlertKind::OwnSpeeding => 9,
+            AlertKind::PriorityConflict => 10,
+            AlertKind::PossibleConflict => 11,
+        };
+        out.sort_by(|a, b| {
+            b.level
+                .cmp(&a.level)
+                .then(rank(a.kind).cmp(&rank(b.kind)))
+                .then(
+                    a.ttc_s
+                        .unwrap_or(f64::INFINITY)
+                        .total_cmp(&b.ttc_s.unwrap_or(f64::INFINITY)),
+                )
+        });
+        (out, extra)
     }
 
     /// Alerts for the reference state machine (YIELD/BRAKE → Danger, WARN → Caution,
@@ -923,8 +1490,8 @@ mod tests {
 
     /// Run two engines facing each other for `secs`; returns A's decisions.
     fn exchange(a: &mut Obu, sa: &OwnState, b: &mut Obu, sb: &OwnState, now: f64) {
-        let fa = a.transmit(now, sa, &mut FixedId(*b"AAAA"));
-        let fb = b.transmit(now, sb, &mut FixedId(*b"BBBB"));
+        let fa = a.transmit(now, sa, &RoadContext::default(), &mut FixedId(*b"AAAA"));
+        let fb = b.transmit(now, sb, &RoadContext::default(), &mut FixedId(*b"BBBB"));
         for f in &fb {
             a.receive(f, now, sa, &NoAuth);
         }
@@ -971,7 +1538,7 @@ mod tests {
         let o = GeoOrigin::phnom_penh();
         let mut a = Obu::new(Config::reference(), o, false);
         let sa = own(0.0, 0.0, 0.0, 10.0);
-        let mine = a.transmit(0.0, &sa, &mut FixedId(*b"AAAA"));
+        let mine = a.transmit(0.0, &sa, &RoadContext::default(), &mut FixedId(*b"AAAA"));
         assert_eq!(a.receive(&mine[0], 0.0, &sa, &NoAuth), RxOutcome::Own);
     }
 
@@ -982,13 +1549,18 @@ mod tests {
         let sa = own(0.0, 0.0, 0.0, 10.0);
         let mut b = Obu::new(Config::reference(), o, false);
         let fast = own(100.0, 0.0, 0.0, 95.0);
-        let f = b.transmit(0.0, &fast, &mut FixedId(*b"EVIL"));
+        let f = b.transmit(0.0, &fast, &RoadContext::default(), &mut FixedId(*b"EVIL"));
         assert!(matches!(
             a.receive(&f[0], 0.0, &sa, &NoAuth),
             RxOutcome::Misbehaviour { report: true, .. }
         ));
         assert!(a.blocked().contains(b"EVIL"));
-        let f2 = b.transmit(0.1, &own(100.0, 0.0, 0.0, 10.0), &mut FixedId(*b"EVIL"));
+        let f2 = b.transmit(
+            0.1,
+            &own(100.0, 0.0, 0.0, 10.0),
+            &RoadContext::default(),
+            &mut FixedId(*b"EVIL"),
+        );
         assert_eq!(a.receive(&f2[0], 0.1, &sa, &NoAuth), RxOutcome::Blocked);
     }
 
@@ -998,7 +1570,12 @@ mod tests {
         let mut relay = Obu::new(Config::reference(), o, true);
         let me = own(200.0, 0.0, 0.0, 10.0); // 200 m from the sender: enough progress
         let mut b = Obu::new(Config::reference(), o, false);
-        let f = b.transmit(0.0, &own(0.0, 0.0, 0.0, 10.0), &mut FixedId(*b"BBBB"));
+        let f = b.transmit(
+            0.0,
+            &own(0.0, 0.0, 0.0, 10.0),
+            &RoadContext::default(),
+            &mut FixedId(*b"BBBB"),
+        );
         assert!(matches!(
             relay.receive(&f[0], 0.0, &me, &NoAuth),
             RxOutcome::Accepted { hops: 0, .. }
@@ -1007,7 +1584,7 @@ mod tests {
             relay.receive(&f[0], 0.0, &me, &NoAuth),
             RxOutcome::Dropped
         ));
-        let out = relay.transmit(0.1, &me, &mut FixedId(*b"RRRR"));
+        let out = relay.transmit(0.1, &me, &RoadContext::default(), &mut FixedId(*b"RRRR"));
         assert_eq!(out.len(), 2); // the relayed frame, then my own message
         let Ok(fwd) = Rsm::decode(&out[0].body) else {
             unreachable!()
@@ -1019,6 +1596,346 @@ mod tests {
             rsm::signing_bytes(&out[0].body),
             rsm::signing_bytes(&f[0].body)
         );
+    }
+
+    // ------------------------------------------------------------ SPEC §8 (spec_v0 profile)
+
+    #[allow(clippy::too_many_arguments)]
+    fn peer(
+        id: &[u8; 4],
+        msg_id: u16,
+        t: f64,
+        x: f64,
+        y: f64,
+        heading: f64,
+        speed: f64,
+        accel: f64,
+        fl: u8,
+        acc_m: f64,
+    ) -> Frame {
+        let (lat, lon) = GeoOrigin::phnom_penh().to_latlon(x, y);
+        let body = Rsm {
+            msg_type: MsgType::Heartbeat,
+            temp_id: *id,
+            msg_id,
+            timestamp_ms: rsm::ms_of_hour(t),
+            lat_deg: lat,
+            lon_deg: lon,
+            speed,
+            heading_deg: math_to_compass_deg(heading),
+            accel,
+            yaw_rate: 0.0,
+            vehicle_type: VehicleType::Car,
+            flags: fl,
+            pos_accuracy_m: acc_m,
+            hop_count: 0,
+            ttl: 2,
+            origin_pos_age_ms: 0,
+            event: EventCode::None,
+        }
+        .encode();
+        Frame {
+            last_hop: None,
+            body,
+            auth: Vec::new(),
+        }
+    }
+
+    fn spec() -> Obu {
+        Obu::new(Config::spec_v0(), GeoOrigin::phnom_penh(), false)
+    }
+
+    fn kinds(d: &Decision) -> Vec<(AlertKind, Level)> {
+        d.alerts.iter().map(|a| (a.kind, a.level)).collect()
+    }
+
+    fn step(o: &mut Obu, t: f64, me: &OwnState, road: &RoadContext, frames: &[Frame]) -> Decision {
+        for f in frames {
+            o.receive(f, t, me, &NoAuth);
+        }
+        o.decide(t, 0.1, me, road, &crate::behavior::NoLimits)
+    }
+
+    /// AUDIT P-29, P-34: crossing conflict, Danger only for the vehicle that must give way
+    #[test]
+    fn spec_crossing_danger_only_for_the_vehicle_that_must_yield() {
+        let (mut a, mut b) = (spec(), spec());
+        let sa = own(-40.0, -1.5, 0.0, 13.9);
+        let sb = own(1.5, -40.0, FRAC_PI_2, 13.9);
+        exchange(&mut a, &sa, &mut b, &sb, 0.0);
+        let road = RoadContext::default();
+        let da = a.decide(0.0, 0.1, &sa, &road, &crate::behavior::NoLimits);
+        let db = b.decide(0.0, 0.1, &sb, &road, &crate::behavior::NoLimits);
+        assert_eq!(da.alerts[0].kind, AlertKind::CrossingConflict);
+        assert_eq!(da.alerts[0].level, Level::Danger);
+        assert!(da.alerts[0].ttc_s.is_some());
+        assert!(da.alerts[0].advice >= BrakeAdvice::BrakeGently);
+        assert!(
+            db.alerts.iter().all(|x| x.level < Level::Danger),
+            "{:?}",
+            kinds(&db)
+        );
+        assert!(
+            db.alerts
+                .iter()
+                .any(|x| x.kind == AlertKind::PriorityConflict && x.level == Level::Caution)
+        );
+    }
+
+    /// AUDIT P-30: hard braking ahead, and its 1 s exit hold (P-35)
+    #[test]
+    fn spec_hard_braking_ahead_enters_and_holds_for_1_s() {
+        let mut o = spec();
+        let me = own(0.0, 0.0, 0.0, 20.0);
+        let road = RoadContext::default();
+        let d = step(
+            &mut o,
+            0.0,
+            &me,
+            &road,
+            &[peer(b"lead", 1, 0.0, 120.0, 0.0, 0.0, 20.0, -6.0, 0, 1.0)],
+        );
+        assert!(kinds(&d).contains(&(AlertKind::HardBrakingAhead, Level::Danger)));
+        // braking stops (decel 1.0 < 1.5): stays for 1 s, then clears
+        let mut cleared_at = None;
+        for i in 1..=20u16 {
+            let t = f64::from(i) * 0.1;
+            let d = step(
+                &mut o,
+                t,
+                &me,
+                &road,
+                &[peer(
+                    b"lead",
+                    1 + i,
+                    t,
+                    120.0 + 20.0 * t,
+                    0.0,
+                    0.0,
+                    20.0,
+                    -1.0,
+                    0,
+                    1.0,
+                )],
+            );
+            if cleared_at.is_none() && !kinds(&d).iter().any(|k| k.0 == AlertKind::HardBrakingAhead)
+            {
+                cleared_at = Some(t);
+            }
+        }
+        assert!(
+            cleared_at.is_some_and(|t| (1.05..1.25).contains(&t)),
+            "{cleared_at:?}"
+        );
+    }
+
+    /// AUDIT P-31: a vehicle overtaking me (its overtaking flag, beside or behind)
+    #[test]
+    fn spec_overtaking_you_warning() {
+        let mut o = spec();
+        let me = own(0.0, -1.75, 0.0, 15.0);
+        let road = RoadContext::default();
+        let d = step(
+            &mut o,
+            0.0,
+            &me,
+            &road,
+            &[peer(
+                b"pass",
+                1,
+                0.0,
+                -8.0,
+                1.75,
+                0.0,
+                25.0,
+                0.0,
+                flags::OVERTAKING,
+                1.0,
+            )],
+        );
+        assert!(kinds(&d).contains(&(AlertKind::OvertakingYou, Level::Warning)));
+        // 12 m ahead: over
+        let d = step(
+            &mut o,
+            0.1,
+            &me,
+            &road,
+            &[peer(
+                b"pass",
+                2,
+                0.1,
+                12.0,
+                1.75,
+                0.0,
+                25.0,
+                0.0,
+                flags::OVERTAKING,
+                1.0,
+            )],
+        );
+        assert!(!kinds(&d).iter().any(|k| k.0 == AlertKind::OvertakingYou));
+    }
+
+    /// AUDIT P-32, P-35: fast approach from behind, enter above 5 m/s closing, leave below 2
+    #[test]
+    fn spec_fast_approach_from_behind_with_hysteresis() {
+        let mut o = spec();
+        let me = own(0.0, 0.0, 0.0, 15.0);
+        let road = RoadContext::default();
+        let present =
+            |d: &Decision| kinds(d).contains(&(AlertKind::FastApproachBehind, Level::Warning));
+        assert!(!present(&step(
+            &mut o,
+            0.0,
+            &me,
+            &road,
+            &[peer(b"back", 1, 0.0, -60.0, 0.0, 0.0, 19.0, 0.0, 0, 1.0)]
+        ))); // closing 4
+        assert!(present(&step(
+            &mut o,
+            0.1,
+            &me,
+            &road,
+            &[peer(b"back", 2, 0.1, -59.6, 0.0, 0.0, 21.0, 0.0, 0, 1.0)]
+        ))); // closing 6
+        assert!(present(&step(
+            &mut o,
+            0.2,
+            &me,
+            &road,
+            &[peer(b"back", 3, 0.2, -59.0, 0.0, 0.0, 18.0, 0.0, 0, 1.0)]
+        ))); // 3: stays
+        assert!(!present(&step(
+            &mut o,
+            0.3,
+            &me,
+            &road,
+            &[peer(b"back", 4, 0.3, -58.7, 0.0, 0.0, 16.5, 0.0, 0, 1.0)]
+        ))); // 1.5: leaves
+    }
+
+    /// AUDIT P-33, P-35: own speeding above limit + 5 km/h, ends at or below the limit
+    #[test]
+    fn spec_own_speeding_with_hysteresis() {
+        let mut o = spec();
+        let road = RoadContext {
+            speed_limit: Some(50.0 / 3.6),
+            at_junction: false,
+        };
+        let at = |kmh: f64| own(0.0, 0.0, 0.0, kmh / 3.6);
+        let on = |d: &Decision| {
+            d.alerts.iter().any(|a| {
+                a.kind == AlertKind::OwnSpeeding
+                    && a.level == Level::Warning
+                    && a.advice == BrakeAdvice::EaseOff
+            })
+        };
+        assert!(!on(&step(&mut o, 0.0, &at(54.0), &road, &[])));
+        assert!(on(&step(&mut o, 0.1, &at(56.0), &road, &[])));
+        assert!(on(&step(&mut o, 0.2, &at(52.0), &road, &[]))); // still above the limit: stays
+        assert!(!on(&step(&mut o, 0.3, &at(50.0), &road, &[])));
+    }
+
+    /// SPEC §6 confidence gate + user decision: an imprecise track gives Caution "ease off", never Danger
+    #[test]
+    fn spec_low_confidence_track_gives_caution_only() {
+        let mut o = spec();
+        let me = own(-40.0, -1.5, 0.0, 13.9);
+        let road = RoadContext::default();
+        let d = step(
+            &mut o,
+            0.0,
+            &me,
+            &road,
+            &[peer(
+                b"fuzz", 1, 0.0, 1.5, -40.0, FRAC_PI_2, 13.9, 0.0, 0, 12.0,
+            )],
+        );
+        assert!(
+            d.alerts.iter().all(|a| a.level == Level::Caution),
+            "{:?}",
+            kinds(&d)
+        );
+        assert!(
+            d.alerts
+                .iter()
+                .any(|a| a.kind == AlertKind::PossibleConflict && a.advice == BrakeAdvice::EaseOff)
+        );
+    }
+
+    #[test]
+    fn spec_stopped_vehicle_sends_stopped_traffic_events_away_from_junctions() {
+        let mut o = spec();
+        let stopped = own(0.0, 0.0, 0.0, 0.0);
+        let mut ids = FixedId(*b"STOP");
+        let event_at = |o: &mut Obu, t: f64, road: &RoadContext, ids: &mut FixedId| {
+            let f = o.transmit(t, &stopped, road, ids);
+            let Ok(r) = Rsm::decode(&f[0].body) else {
+                unreachable!()
+            };
+            (r.event, r.ttl)
+        };
+        let road = RoadContext::default();
+        assert_eq!(event_at(&mut o, 0.0, &road, &mut ids).0, EventCode::None);
+        assert_eq!(event_at(&mut o, 4.9, &road, &mut ids).0, EventCode::None);
+        assert_eq!(
+            event_at(&mut o, 5.0, &road, &mut ids),
+            (EventCode::StoppedTraffic, 5)
+        );
+        assert_eq!(event_at(&mut o, 5.5, &road, &mut ids).0, EventCode::None); // 1 Hz
+        assert_eq!(
+            event_at(&mut o, 6.0, &road, &mut ids).0,
+            EventCode::StoppedTraffic
+        );
+        let mut j = spec();
+        let junction = RoadContext {
+            speed_limit: None,
+            at_junction: true,
+        };
+        for t in [0.0, 6.0, 7.0] {
+            assert_eq!(event_at(&mut j, t, &junction, &mut ids).0, EventCode::None); // waiting at a junction is normal
+        }
+    }
+
+    #[test]
+    fn spec_hard_brake_event_is_sent_three_times() {
+        let mut o = spec();
+        let mut braking = own(0.0, 0.0, 0.0, 20.0);
+        braking.motion.accel = -6.0;
+        let mut ids = FixedId(*b"BRAK");
+        let road = RoadContext::default();
+        let events: Vec<EventCode> = (0..5)
+            .map(|i| {
+                let f = o.transmit(f64::from(i) * 0.1, &braking, &road, &mut ids);
+                Rsm::decode(&f[0].body).map_or(EventCode::None, |r| r.event)
+            })
+            .collect();
+        assert_eq!(
+            events,
+            [
+                EventCode::HardBrake,
+                EventCode::HardBrake,
+                EventCode::HardBrake,
+                EventCode::None,
+                EventCode::None
+            ]
+        );
+    }
+
+    #[test]
+    fn spec_own_overtaking_flag_is_broadcast() {
+        let mut o = spec();
+        let me = own(0.0, 1.75, 0.0, 25.0); // in the oncoming lane, faster
+        let road = RoadContext::default();
+        step(
+            &mut o,
+            0.0,
+            &me,
+            &road,
+            &[peer(b"slow", 1, 0.0, 5.0, -1.75, 0.0, 15.0, 0.0, 0, 1.0)],
+        );
+        let f = o.transmit(0.1, &me, &road, &mut FixedId(*b"FAST"));
+        assert!(Rsm::decode(&f[0].body).is_ok_and(|r| r.flags & flags::OVERTAKING != 0));
     }
 
     #[test]

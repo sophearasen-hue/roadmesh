@@ -29,6 +29,11 @@ pub struct Config {
     pub pred_step_s: f64,
     /// Vehicle outlines are inflated by this much when predicting (m).
     pub safety_margin_m: f64,
+    /// Each vehicle's outline is lengthened at both ends by this factor × its own reported
+    /// position accuracy, so noisy GPS widens the conflict zone along the path instead of
+    /// creating false certainty (SPEC §6). Lengthwise only: widening sideways would merge
+    /// adjacent lanes (3.5 m apart) until map matching arrives in Step 4.
+    pub uncertainty_margin_factor: f64,
     /// Warn below this predicted time to conflict (s).
     pub ttc_warn_s: f64,
     /// A conflicting vehicle that does not yield becomes Danger below this (s).
@@ -147,6 +152,8 @@ pub struct Config {
     pub behaviour_max_age_s: f64,
     /// Side-by-side lateral offset that makes a pass an overtake (m).
     pub overtake_min_lateral_m: f64,
+    /// The pass counts once the overtaking vehicle is this far ahead (m). SPEC §7: 10.
+    pub overtake_complete_m: f64,
     /// Score model.
     pub score_model: ScoreModel,
     /// SPEC §7 penalties (points).
@@ -191,6 +198,8 @@ pub struct Config {
     pub approach_behind_enter: f64,
     /// ... ends when closing slower than this (m/s).
     pub approach_behind_exit: f64,
+    /// Hard-brake events are sent on this many consecutive messages (SPEC §3: 3 within 300 ms).
+    pub event_repeats: u8,
     /// Own speeding alert above limit + this (m/s).
     pub own_speeding_enter: f64,
     /// ... ends at or below limit + this (m/s).
@@ -204,6 +213,7 @@ impl Config {
             horizon_s: 5.0,
             pred_step_s: 0.1,
             safety_margin_m: 0.5,
+            uncertainty_margin_factor: 0.0,
             ttc_warn_s: 4.0,
             ttc_brake_s: 2.0,
             yield_pet_s: 1.0,
@@ -263,6 +273,7 @@ impl Config {
             behaviour_pair_range_m: 150.0,
             behaviour_max_age_s: 1.0,
             overtake_min_lateral_m: 1.5,
+            overtake_complete_m: 0.0,
             score_model: ScoreModel::ReferenceTime,
             penalty_speeding: 0.0,
             penalty_harsh_brake: 8.0,
@@ -285,14 +296,70 @@ impl Config {
             approach_behind_range_m: 80.0,
             approach_behind_enter: 5.0,
             approach_behind_exit: 2.0,
+            event_repeats: 0, // the reference sends no event messages
             own_speeding_enter: 5.0 / 3.6,
             own_speeding_exit: 0.0,
         }
     }
 
-    /// Product profile: SPEC v0.1. Filled in by Step 2g; until then identical to the reference.
+    /// Product profile: SPEC v0.1 values. Prediction, right of way and the advice
+    /// algorithm are the reference's; thresholds, freshness, relay hop limits,
+    /// behaviour rules and alerts follow the spec.
     pub fn spec_v0() -> Self {
-        Self::reference()
+        let kmh = 1.0 / 3.6;
+        Self {
+            // §6 prediction: 6 s ahead; position uncertainty widens the conflict zone
+            horizon_s: 6.0,
+            uncertainty_margin_factor: 1.0,
+            // §10 misbehaviour: above 200 km/h is implausible
+            max_plausible_speed: 200.0 * kmh,
+            // §5 rule 7: relayed heartbeats older than 1 s, events older than 10 s are dropped
+            far_max_age_s: 1.0,
+            event_max_age_s: 10.0,
+            // §6: tracks expire 2 s after their last update
+            ldm_ttl_s: 2.0,
+            // AUDIT S-08: ignore a pseudonym sending more than 12 msg/s
+            min_msg_interval_s: 1.0 / 12.0,
+            // §6 confidence gate (8 m), with a Caution fallback (user decision, Step 2)
+            max_alert_pos_accuracy_m: 8.0,
+            low_confidence_caution: true,
+            // §5 rule 1: heartbeats TTL 2, events TTL 5
+            heartbeat_ttl: 2,
+            event_ttl: 5,
+            // §3 send rates: an event is sent immediately and repeated 3 times within 300 ms
+            event_repeats: 3,
+            // stopped-traffic events (event code 5, Step 2)
+            stopped_event_after_s: 5.0,
+            stopped_event_interval_s: 1.0,
+            // §7 behaviour
+            speeding_ratio: 1.0,
+            speeding_offset: 10.0 * kmh,
+            speeding_min_s: 3.0,
+            speeding_end_ratio: 1.0,
+            speeding_end_offset: 5.0 * kmh,
+            harsh_brake: 4.5,
+            harsh_brake_end: 2.0,
+            harsh_accel: 3.0,
+            harsh_accel_motorbike: 3.5,
+            harsh_accel_end: 1.5,
+            tailgate_headway_s: 0.8,
+            tailgate_end_headway_s: 1.2,
+            tailgate_min_s: 5.0,
+            overtake_complete_m: 10.0,
+            score_model: ScoreModel::SpecEpisodes,
+            penalty_speeding: 6.0,
+            penalty_harsh_brake: 5.0,
+            penalty_harsh_accel: 3.0,
+            penalty_overtake: 1.0,
+            penalty_overtake_risky: 4.0,
+            penalty_tailgating: 2.0,
+            score_recovery_per_min: 1.2,
+            // §10: peer records deleted at track expiry + 10 min
+            peer_record_retention_s: 600.0,
+            // §8 alerts
+            spec_alerts: true,
+            ..Self::reference()
+        }
     }
 }
 
@@ -311,6 +378,81 @@ mod tests {
         assert!((c.hazard_advisory_speed - 25.0).abs() < 1e-9);
         assert_eq!(c.score_model, ScoreModel::ReferenceTime);
         assert!(!c.spec_alerts);
+    }
+
+    #[test]
+    fn spec_profile_matches_spec_v0_1() {
+        let c = Config::spec_v0();
+        let kmh = 1.0 / 3.6;
+        assert_eq!(c.horizon_s, 6.0); // §6
+        assert!((c.max_plausible_speed - 200.0 * kmh).abs() < 1e-9); // §10
+        assert_eq!((c.heartbeat_ttl, c.event_ttl), (2, 5)); // §5 rule 1
+        assert_eq!((c.far_max_age_s, c.event_max_age_s), (1.0, 10.0)); // §5 rule 7
+        assert_eq!(c.ldm_ttl_s, 2.0); // §6
+        assert!((c.min_msg_interval_s - 1.0 / 12.0).abs() < 1e-12); // AUDIT S-08
+        assert_eq!(c.max_alert_pos_accuracy_m, 8.0); // §6
+        assert!((c.speeding_offset - 10.0 * kmh).abs() < 1e-9 && c.speeding_min_s == 3.0); // §7
+        assert!((c.speeding_end_offset - 5.0 * kmh).abs() < 1e-9);
+        assert_eq!((c.harsh_brake, c.harsh_brake_end), (4.5, 2.0));
+        assert_eq!(
+            (c.harsh_accel, c.harsh_accel_motorbike, c.harsh_accel_end),
+            (3.0, 3.5, 1.5)
+        );
+        assert_eq!(
+            (
+                c.tailgate_headway_s,
+                c.tailgate_min_s,
+                c.tailgate_end_headway_s
+            ),
+            (0.8, 5.0, 1.2)
+        );
+        assert_eq!(c.overtake_complete_m, 10.0);
+        assert_eq!(
+            (
+                c.penalty_speeding,
+                c.penalty_harsh_brake,
+                c.penalty_harsh_accel,
+                c.penalty_overtake,
+                c.penalty_overtake_risky,
+                c.penalty_tailgating
+            ),
+            (6.0, 5.0, 3.0, 1.0, 4.0, 2.0)
+        );
+        assert_eq!(c.score_recovery_per_min, 1.2);
+        assert_eq!(c.peer_record_retention_s, 600.0); // §10
+        assert_eq!(
+            (
+                c.crossing_horizon_s,
+                c.crossing_enter_gap_s,
+                c.crossing_exit_gap_s,
+                c.crossing_min_speed
+            ),
+            (7.0, 2.2, 3.0, 2.0)
+        ); // §8
+        assert_eq!(
+            (
+                c.hard_brake_ahead_decel,
+                c.hard_brake_ahead_range_m,
+                c.hard_brake_exit_decel,
+                c.hard_brake_exit_hold_s
+            ),
+            (4.0, 200.0, 1.5, 1.0)
+        );
+        assert_eq!(
+            (c.overtaking_you_range_m, c.overtaking_you_exit_ahead_m),
+            (25.0, 10.0)
+        );
+        assert_eq!(
+            (
+                c.approach_behind_range_m,
+                c.approach_behind_enter,
+                c.approach_behind_exit
+            ),
+            (80.0, 5.0, 2.0)
+        );
+        assert!((c.own_speeding_enter - 5.0 * kmh).abs() < 1e-9 && c.own_speeding_exit == 0.0);
+        assert_eq!(c.event_repeats, 3); // §3
+        assert!(c.spec_alerts);
     }
 
     #[test]

@@ -1,5 +1,8 @@
-//! `roadmesh-sim <scenario> [--off] [--no-relay] [--no-security] [--loss P] [--seed N]`
+//! `roadmesh-sim <scenario> [--spec] [--off] [--no-relay] [--no-security] [--loss P] [--seed N]`
+//!
+//! `--spec` runs the product profile (SPEC v0.1); the default is the reference profile.
 
+use roadmesh_core::config::Config;
 use roadmesh_sim::scenarios;
 use roadmesh_sim::world::{Moment, Options};
 
@@ -18,6 +21,9 @@ fn main() {
     };
     opts.relay = !args.iter().any(|a| a == "--no-relay");
     opts.security = !args.iter().any(|a| a == "--no-security");
+    if args.iter().any(|a| a == "--spec") {
+        opts.config = Config::spec_v0();
+    }
     let value = |flag: &str| {
         args.iter()
             .position(|a| a == flag)
@@ -51,6 +57,24 @@ fn main() {
             Moment::Revoked { t, owner } => {
                 println!("  t={t:5.1}s  certificate of {owner} revoked")
             }
+            Moment::Alert {
+                t,
+                car,
+                alert: Some((kind, level, advice)),
+                target,
+            } => {
+                let about = target
+                    .as_ref()
+                    .map(|n| format!(" ({n})"))
+                    .unwrap_or_default();
+                println!("  t={t:5.1}s  {car} screen: {level:?} {kind:?} -> {advice:?}{about}")
+            }
+            Moment::Alert {
+                t,
+                car,
+                alert: None,
+                ..
+            } => println!("  t={t:5.1}s  {car} screen: all clear"),
         }
     }
     for (t, a, b) in &s.collisions {

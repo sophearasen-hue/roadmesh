@@ -16,7 +16,9 @@ use roadmesh_core::behavior::SpeedLimits;
 use roadmesh_core::config::Config;
 use roadmesh_core::geo::{GeoOrigin, math_to_compass_deg};
 use roadmesh_core::geometry::{Point, polygons_overlap, segment_hits_polygon, vehicle_box};
-use roadmesh_core::obu::{Decision, DriveState, Obu, OwnState, RoadContext, RxOutcome};
+use roadmesh_core::obu::{
+    AlertKind, BrakeAdvice, Decision, DriveState, Level, Obu, OwnState, RoadContext, RxOutcome,
+};
 use roadmesh_core::prediction::{Motion, first_conflict, trajectory};
 use roadmesh_core::rsm::{self, EventCode, Frame, MsgType, Rsm, TempId, VehicleType};
 
@@ -432,6 +434,17 @@ pub enum Moment {
         /// distance (m)
         gap: f64,
     },
+    /// The alert at the top of `car`'s screen changed.
+    Alert {
+        /// time (s)
+        t: f64,
+        /// whose screen
+        car: String,
+        /// new top alert, `None` = all clear
+        alert: Option<(AlertKind, Level, BrakeAdvice)>,
+        /// about whom
+        target: Option<String>,
+    },
     /// A certificate was revoked.
     Revoked {
         /// time (s)
@@ -786,11 +799,15 @@ impl World {
                     continue;
                 }
                 let own = self.vehicles[i].own_state();
+                let road = RoadContext {
+                    speed_limit: self.zones.limit_at(own.motion.x, own.motion.y),
+                    at_junction: false,
+                };
                 if let (Some(obu), Some(signer)) = (self.obus[i].as_mut(), self.signers[i].as_mut())
                 {
                     let relays_before = obu.pending_relays().len() as u64;
                     let pos = (own.motion.x, own.motion.y);
-                    for f in obu.transmit(now, &own, signer) {
+                    for f in obu.transmit(now, &own, &road, signer) {
                         self.pending.push((i, pos, f));
                     }
                     self.radio.relayed += relays_before;
@@ -833,9 +850,28 @@ impl World {
             let mut cap = None;
             if let Some(obu) = self.obus[i].as_mut() {
                 let prev = self.decisions[i].as_ref().map(|d| d.state);
+                let prev_top = self.decisions[i]
+                    .as_ref()
+                    .and_then(|d| d.alerts.first().map(|a| (a.kind, a.level, a.target)));
                 let d = obu.decide(now, TICK, &own, &road, &self.zones);
                 cap = d.advised_accel;
                 self.note_decision(i, now, prev, &d);
+                let top = d.alerts.first().map(|a| (a.kind, a.level, a.target));
+                if top != prev_top {
+                    let car = self.vehicles[i].name.clone();
+                    let alert = d.alerts.first().map(|a| (a.kind, a.level, a.advice));
+                    let target = d
+                        .alerts
+                        .first()
+                        .and_then(|a| a.target)
+                        .map(|id| self.owner(&id));
+                    self.moments.push(Moment::Alert {
+                        t: now,
+                        car,
+                        alert,
+                        target,
+                    });
+                }
                 self.decisions[i] = Some(d);
             }
             let m = self.vehicles[i].active_maneuver(now);
