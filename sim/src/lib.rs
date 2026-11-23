@@ -5,10 +5,12 @@
 //! reference outcomes. Step 4 adds the Cambodian traffic mix, GPS noise and
 //! packet-loss statistics.
 //!
-//! Everything security-related here (demo HMAC PKI, seeded random numbers) is
+//! The simulator runs the real certificate, signature and revocation code
+//! (`roadmesh_core::pki`, `roadmesh_server::ca`). Only the key storage is
+//! simulated: software keys from a seeded generator ([`keys`]), which is
 //! simulator-only and must never be used by the product.
 
-pub mod pki;
+pub mod keys;
 pub mod rng;
 pub mod scenarios;
 pub mod world;

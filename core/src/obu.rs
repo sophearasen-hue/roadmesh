@@ -231,6 +231,12 @@ pub struct Obu {
     own_ids: HashSet<TempId>,
     blocked: HashSet<TempId>,
     reported: HashSet<TempId>,
+    /// Last accepted frame per peer, kept while the peer is in the LDM (evidence for reports).
+    last_frame: HashMap<TempId, Frame>,
+    /// Signed frames proving a peer's misbehaviour, waiting for the platform to file a report.
+    evidence: HashMap<TempId, Vec<Frame>>,
+    /// Heartbeats seen per peer, for verification sampling (off by default).
+    sample_count: HashMap<TempId, u32>,
     outbox: Vec<Frame>,
     msg_id: u16,
     state: DriveState,
@@ -303,6 +309,9 @@ impl Obu {
             own_ids: HashSet::new(),
             blocked: HashSet::new(),
             reported: HashSet::new(),
+            last_frame: HashMap::new(),
+            evidence: HashMap::new(),
+            sample_count: HashMap::new(),
             outbox: Vec::new(),
             msg_id: 0,
             state: DriveState::Cruise,
@@ -333,6 +342,37 @@ impl Obu {
         &self.blocked
     }
 
+    /// Block a sender locally, e.g. one whose certificate the server revoked.
+    pub fn block(&mut self, temp_id: TempId) {
+        self.blocked.insert(temp_id);
+        self.ldm.remove(&temp_id);
+        self.last_frame.remove(&temp_id);
+    }
+
+    /// The signed frames that prove `temp_id` misbehaved (taken once), for
+    /// [`crate::pki::MisbehaviourReport::build`].
+    pub fn take_evidence(&mut self, temp_id: &TempId) -> Vec<Frame> {
+        self.evidence.remove(temp_id).unwrap_or_default()
+    }
+
+    /// SPEC §10 sampling: with many peers around, check the signature of only 1 in
+    /// `verify_sample_every` heartbeats from peers already in the LDM. Off by default.
+    fn sample_skip(&mut self, r: &Rsm) -> bool {
+        let sec = &self.cfg.security;
+        let Some(above) = sec.verify_sample_above_peers else {
+            return false;
+        };
+        if r.msg_type != MsgType::Heartbeat
+            || self.ldm.len() <= above
+            || self.ldm.get(&r.temp_id).is_none()
+        {
+            return false;
+        }
+        let n = self.sample_count.entry(r.temp_id).or_insert(0);
+        *n = n.wrapping_add(1);
+        !(*n).is_multiple_of(sec.verify_sample_every.max(1))
+    }
+
     /// Pseudonyms this phone has used.
     pub fn own_ids(&self) -> &HashSet<TempId> {
         &self.own_ids
@@ -361,7 +401,9 @@ impl Obu {
         signer: &mut dyn Signer,
     ) -> Vec<Frame> {
         let mut out = std::mem::take(&mut self.outbox);
-        let temp_id = signer.current_temp_id(now);
+        let Some(temp_id) = signer.current_temp_id(now) else {
+            return out; // no valid certificate: receive and relay only, never send unsigned
+        };
         self.own_ids.insert(temp_id);
         self.msg_id = self.msg_id.wrapping_add(1);
         let m = &own.motion;
@@ -432,7 +474,9 @@ impl Obu {
             event,
         };
         let body = r.encode();
-        let auth = signer.sign(&temp_id, &rsm::signing_bytes(&body));
+        let Some(auth) = signer.sign(now, is_event, &body) else {
+            return out;
+        };
         out.push(Frame {
             last_hop: None,
             body,
@@ -449,7 +493,7 @@ impl Obu {
         bytes: &[u8],
         now: f64,
         own: &OwnState,
-        verifier: &dyn Verifier,
+        verifier: &mut dyn Verifier,
     ) -> RxOutcome {
         match Frame::decode(bytes) {
             Ok(f) => self.receive(&f, now, own, verifier),
@@ -463,22 +507,30 @@ impl Obu {
         frame: &Frame,
         now: f64,
         own: &OwnState,
-        verifier: &dyn Verifier,
+        verifier: &mut dyn Verifier,
     ) -> RxOutcome {
         let r = match Rsm::decode(&frame.body) {
             Ok(r) => r,
             Err(e) => return RxOutcome::Malformed(e),
         };
-        if let Err(reason) =
-            verifier.verify(&r.temp_id, &rsm::signing_bytes(&frame.body), &frame.auth)
-        {
+        if self.blocked.contains(&r.temp_id) {
+            return RxOutcome::Blocked; // cheap checks first: no crypto for blocked senders
+        }
+        if self.ldm.has_seen(&r.temp_id, r.msg_id) {
+            // A copy of a message already verified and accepted (normal with relaying).
+            // Dropping a forged copy is harmless: only verified messages enter the cache.
+            return RxOutcome::Dropped;
+        }
+        let auth = if self.sample_skip(&r) {
+            verifier.verify_certificate_only(now, &frame.body, &frame.auth)
+        } else {
+            verifier.verify(now, &frame.body, &frame.auth)
+        };
+        if let Err(reason) = auth {
             return RxOutcome::AuthFailed {
                 temp_id: r.temp_id,
                 reason,
             };
-        }
-        if self.blocked.contains(&r.temp_id) {
-            return RxOutcome::Blocked;
         }
         if self.own_ids.contains(&r.temp_id) {
             return RxOutcome::Own;
@@ -491,6 +543,13 @@ impl Obu {
                 self.blocked.insert(r.temp_id);
                 self.ldm.remove(&r.temp_id);
                 let report = self.reported.insert(r.temp_id);
+                if report {
+                    // keep the signed proof for the misbehaviour report (SPEC §10)
+                    let mut proof: Vec<Frame> =
+                        self.last_frame.remove(&r.temp_id).into_iter().collect();
+                    proof.push(frame.clone());
+                    self.evidence.insert(r.temp_id, proof);
+                }
                 return RxOutcome::Misbehaviour {
                     temp_id: r.temp_id,
                     reason,
@@ -500,6 +559,7 @@ impl Obu {
             Check::Ok => {}
         }
         self.ldm.update(msg, now, r.hop_count);
+        self.last_frame.insert(r.temp_id, frame.clone());
         // Store-and-forward once per message. Only verified, plausible, new messages are relayed.
         if self.relay && r.ttl > 0 {
             let (hx, hy) = match frame.last_hop {
@@ -708,6 +768,10 @@ impl Obu {
     ) -> Decision {
         let c = self.cfg.clone();
         self.ldm.evict(now, &c);
+        // peer data leaves with the track (AUDIT S-14)
+        let ldm = &self.ldm;
+        self.last_frame.retain(|id, _| ldm.get(id).is_some());
+        self.sample_count.retain(|id, _| ldm.get(id).is_some());
         let me = own.motion;
         let dims = own.dims();
         let ego_const = trajectory(Motion { accel: 0.0, ..me }, c.horizon_s, c.pred_step_s, 0.0);
@@ -1457,19 +1521,21 @@ mod tests {
     use super::*;
     use std::f64::consts::FRAC_PI_2;
 
+    /// Logic tests only: accepts everything. The crypto is tested in `pki` and in
+    /// the simulator's end-to-end tests with real certificates.
     struct NoAuth;
     impl Verifier for NoAuth {
-        fn verify(&self, _: &TempId, _: &[u8; rsm::BODY_LEN], _: &[u8]) -> Result<(), AuthError> {
+        fn verify(&mut self, _: f64, _: &[u8; rsm::BODY_LEN], _: &[u8]) -> Result<(), AuthError> {
             Ok(())
         }
     }
     struct FixedId(TempId);
     impl Signer for FixedId {
-        fn current_temp_id(&mut self, _: f64) -> TempId {
-            self.0
+        fn current_temp_id(&mut self, _: f64) -> Option<TempId> {
+            Some(self.0)
         }
-        fn sign(&mut self, _: &TempId, _: &[u8; rsm::BODY_LEN]) -> Vec<u8> {
-            Vec::new()
+        fn sign(&mut self, _: f64, _: bool, _: &[u8; rsm::BODY_LEN]) -> Option<Vec<u8>> {
+            Some(Vec::new())
         }
     }
 
@@ -1493,10 +1559,10 @@ mod tests {
         let fa = a.transmit(now, sa, &RoadContext::default(), &mut FixedId(*b"AAAA"));
         let fb = b.transmit(now, sb, &RoadContext::default(), &mut FixedId(*b"BBBB"));
         for f in &fb {
-            a.receive(f, now, sa, &NoAuth);
+            a.receive(f, now, sa, &mut NoAuth);
         }
         for f in &fa {
-            b.receive(f, now, sb, &NoAuth);
+            b.receive(f, now, sb, &mut NoAuth);
         }
     }
 
@@ -1539,7 +1605,7 @@ mod tests {
         let mut a = Obu::new(Config::reference(), o, false);
         let sa = own(0.0, 0.0, 0.0, 10.0);
         let mine = a.transmit(0.0, &sa, &RoadContext::default(), &mut FixedId(*b"AAAA"));
-        assert_eq!(a.receive(&mine[0], 0.0, &sa, &NoAuth), RxOutcome::Own);
+        assert_eq!(a.receive(&mine[0], 0.0, &sa, &mut NoAuth), RxOutcome::Own);
     }
 
     #[test]
@@ -1551,7 +1617,7 @@ mod tests {
         let fast = own(100.0, 0.0, 0.0, 95.0);
         let f = b.transmit(0.0, &fast, &RoadContext::default(), &mut FixedId(*b"EVIL"));
         assert!(matches!(
-            a.receive(&f[0], 0.0, &sa, &NoAuth),
+            a.receive(&f[0], 0.0, &sa, &mut NoAuth),
             RxOutcome::Misbehaviour { report: true, .. }
         ));
         assert!(a.blocked().contains(b"EVIL"));
@@ -1561,7 +1627,110 @@ mod tests {
             &RoadContext::default(),
             &mut FixedId(*b"EVIL"),
         );
-        assert_eq!(a.receive(&f2[0], 0.1, &sa, &NoAuth), RxOutcome::Blocked);
+        assert_eq!(a.receive(&f2[0], 0.1, &sa, &mut NoAuth), RxOutcome::Blocked);
+    }
+
+    #[test]
+    fn misbehaviour_keeps_signed_evidence_for_the_report() {
+        let o = GeoOrigin::phnom_penh();
+        let mut a = Obu::new(Config::reference(), o, false);
+        let sa = own(0.0, 0.0, 0.0, 10.0);
+        let mut b = Obu::new(Config::reference(), o, false);
+        let ok = b.transmit(
+            0.0,
+            &own(100.0, 0.0, 0.0, 10.0),
+            &RoadContext::default(),
+            &mut FixedId(*b"EVIL"),
+        );
+        assert!(matches!(
+            a.receive(&ok[0], 0.0, &sa, &mut NoAuth),
+            RxOutcome::Accepted { .. }
+        ));
+        let bad = b.transmit(
+            0.1,
+            &own(101.0, 0.0, 0.0, 95.0),
+            &RoadContext::default(),
+            &mut FixedId(*b"EVIL"),
+        );
+        assert!(matches!(
+            a.receive(&bad[0], 0.1, &sa, &mut NoAuth),
+            RxOutcome::Misbehaviour { report: true, .. }
+        ));
+        // the last good frame and the offending one, handed over once
+        assert_eq!(
+            a.take_evidence(b"EVIL"),
+            vec![ok[0].clone(), bad[0].clone()]
+        );
+        assert!(a.take_evidence(b"EVIL").is_empty());
+    }
+
+    /// Counts which check the OBU asked for.
+    #[derive(Default)]
+    struct Counting {
+        full: u32,
+        cert_only: u32,
+    }
+    impl Verifier for Counting {
+        fn verify(&mut self, _: f64, _: &[u8; rsm::BODY_LEN], _: &[u8]) -> Result<(), AuthError> {
+            self.full += 1;
+            Ok(())
+        }
+        fn verify_certificate_only(
+            &mut self,
+            _: f64,
+            _: &[u8; rsm::BODY_LEN],
+            _: &[u8],
+        ) -> Result<(), AuthError> {
+            self.cert_only += 1;
+            Ok(())
+        }
+    }
+
+    fn heartbeats_from(n_peers: u8, rounds: u16, cfg: Config) -> Counting {
+        let o = GeoOrigin::phnom_penh();
+        let mut a = Obu::new(cfg.clone(), o, false);
+        let sa = own(0.0, 0.0, 0.0, 10.0);
+        let mut senders: Vec<Obu> = (0..n_peers)
+            .map(|_| Obu::new(cfg.clone(), o, false))
+            .collect();
+        let mut v = Counting::default();
+        for k in 0..rounds {
+            let t = f64::from(k) * 0.1;
+            for (i, s) in senders.iter_mut().enumerate() {
+                let x = 10.0 * i as f64 + 10.0 * t; // each peer drives at 10 m/s
+                let id = [b'P', i as u8, 0, 0];
+                let f = s.transmit(
+                    t,
+                    &own(x, 50.0, 0.0, 10.0),
+                    &RoadContext::default(),
+                    &mut FixedId(id),
+                );
+                a.receive(&f[0], t, &sa, &mut v);
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn every_message_is_verified_by_default() {
+        let v = heartbeats_from(50, 8, Config::spec_v0());
+        assert_eq!(v.cert_only, 0);
+        assert_eq!(v.full, 400);
+    }
+
+    #[test]
+    fn sampling_when_enabled_checks_one_in_four_heartbeats_of_known_peers() {
+        let mut cfg = Config::spec_v0();
+        cfg.security.verify_sample_above_peers = Some(40);
+        let v = heartbeats_from(50, 8, cfg);
+        assert!(v.cert_only > 0, "sampling never engaged");
+        // never more than 3 of 4 heartbeats skip the signature check
+        assert!(
+            v.full * 3 >= v.cert_only,
+            "full {} cert-only {}",
+            v.full,
+            v.cert_only
+        );
     }
 
     #[test]
@@ -1577,11 +1746,11 @@ mod tests {
             &mut FixedId(*b"BBBB"),
         );
         assert!(matches!(
-            relay.receive(&f[0], 0.0, &me, &NoAuth),
+            relay.receive(&f[0], 0.0, &me, &mut NoAuth),
             RxOutcome::Accepted { hops: 0, .. }
         ));
         assert!(matches!(
-            relay.receive(&f[0], 0.0, &me, &NoAuth),
+            relay.receive(&f[0], 0.0, &me, &mut NoAuth),
             RxOutcome::Dropped
         ));
         let out = relay.transmit(0.1, &me, &RoadContext::default(), &mut FixedId(*b"RRRR"));
@@ -1651,7 +1820,7 @@ mod tests {
 
     fn step(o: &mut Obu, t: f64, me: &OwnState, road: &RoadContext, frames: &[Frame]) -> Decision {
         for f in frames {
-            o.receive(f, t, me, &NoAuth);
+            o.receive(f, t, me, &mut NoAuth);
         }
         o.decide(t, 0.1, me, road, &crate::behavior::NoLimits)
     }

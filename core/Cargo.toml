@@ -11,6 +11,13 @@ publish.workspace = true
 name = "roadmesh_core"
 
 [dependencies]
+# Pure-Rust ECDSA P-256 verification (SPEC §10). No private keys live in the core.
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa"] }
+sha2 = { version = "0.11.1", default-features = false }
+
+[dev-dependencies]
+# Tests generate throwaway keys from the OS random source at run time.
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "getrandom"] }
 
 [lints]
 workspace = true

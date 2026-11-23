@@ -204,6 +204,72 @@ pub struct Config {
     pub own_speeding_enter: f64,
     /// ... ends at or below limit + this (m/s).
     pub own_speeding_exit: f64,
+
+    // ---------------------------------------------------------------- security (SPEC §10, AUDIT S-01..S-08)
+    /// Certificates, revocation and signature checking. The same in both profiles.
+    pub security: Security,
+}
+
+/// Security values (SPEC §10). Used by the phone core and by the server's
+/// certificate authority, so both sides agree.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Security {
+    /// A phone switches pseudonym (and certificate) this often (s). SPEC §3.
+    pub pseudonym_rotate_s: f64,
+    /// A message carries the full certificate at least this often (s); other
+    /// messages carry only its 8-byte digest (SPEC §10, user decision Step 3).
+    pub full_cert_interval_s: f64,
+    /// After switching pseudonym, every message carries the full certificate for this long (s).
+    pub full_cert_after_rotation_s: f64,
+    /// A certificate is valid for this long (s): one week.
+    pub cert_validity_s: u32,
+    /// Most pseudonym certificates one device may receive per `issue_window_s`. SPEC §10, AUDIT S-04.
+    pub certs_per_window: usize,
+    /// Rolling window of the issuance limit (s): one week.
+    pub issue_window_s: u32,
+    /// Independent reporting devices needed to revoke a device (CLAUDE.md: 3).
+    pub revoke_after_reporters: usize,
+    /// Most misbehaviour reports the server accepts from one device per day.
+    pub reports_per_device_per_day: usize,
+    /// An issuance request must be signed within this many seconds of the server's clock.
+    pub issue_request_max_age_s: u32,
+    /// Certificates and messages are accepted up to this far before their start time (s), for clock skew.
+    pub clock_skew_s: f64,
+    /// Verified certificates remembered by one phone.
+    pub cert_cache_max: usize,
+    /// Largest revocation list a phone accepts (entries of 8 bytes).
+    pub crl_max_entries: usize,
+    /// Most frames a misbehaviour report may carry as evidence.
+    pub report_max_evidence: usize,
+    /// Check only 1 in `verify_sample_every` heartbeats of already-verified peers when more
+    /// than this many peers are around. `None` = check every message (v1 decision, Step 3;
+    /// revisit with CPU measurements in Step 5).
+    pub verify_sample_above_peers: Option<usize>,
+    /// See `verify_sample_above_peers`.
+    pub verify_sample_every: u32,
+}
+
+impl Security {
+    /// SPEC v0.1 §10 values.
+    pub fn v0() -> Self {
+        Self {
+            pseudonym_rotate_s: 300.0,
+            full_cert_interval_s: 1.0,
+            full_cert_after_rotation_s: 2.0,
+            cert_validity_s: 7 * 24 * 3600,
+            certs_per_window: 20,
+            issue_window_s: 7 * 24 * 3600,
+            revoke_after_reporters: 3,
+            reports_per_device_per_day: 50,
+            issue_request_max_age_s: 300,
+            clock_skew_s: 2.0,
+            cert_cache_max: 4096,
+            crl_max_entries: 262_144,
+            report_max_evidence: 16,
+            verify_sample_above_peers: None,
+            verify_sample_every: 4,
+        }
+    }
 }
 
 impl Config {
@@ -299,6 +365,8 @@ impl Config {
             event_repeats: 0, // the reference sends no event messages
             own_speeding_enter: 5.0 / 3.6,
             own_speeding_exit: 0.0,
+
+            security: Security::v0(),
         }
     }
 
@@ -453,6 +521,23 @@ mod tests {
         assert!((c.own_speeding_enter - 5.0 * kmh).abs() < 1e-9 && c.own_speeding_exit == 0.0);
         assert_eq!(c.event_repeats, 3); // §3
         assert!(c.spec_alerts);
+    }
+
+    #[test]
+    fn security_matches_spec_v0_1() {
+        for c in [Config::reference(), Config::spec_v0()] {
+            let s = &c.security;
+            assert_eq!(s.pseudonym_rotate_s, 300.0); // §3: every 5 min
+            assert_eq!((s.certs_per_window, s.issue_window_s), (20, 604_800)); // §10: 20/week
+            assert_eq!(s.cert_validity_s, 604_800);
+            assert_eq!(s.revoke_after_reporters, 3); // CLAUDE.md
+            assert_eq!(
+                (s.full_cert_interval_s, s.full_cert_after_rotation_s),
+                (1.0, 2.0)
+            );
+            assert_eq!(s.verify_sample_above_peers, None); // v1: verify every message
+            assert_eq!(s.verify_sample_every, 4); // §10: 1 in 4 when enabled
+        }
     }
 
     #[test]

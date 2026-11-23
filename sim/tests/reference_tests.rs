@@ -1,34 +1,62 @@
-//! Ports of the reference tests that need the simulator or the demo PKI
+//! Ports of the reference tests that need the simulator or the PKI
 //! (`reference/core-python/tests/test_v2v.py`). The other reference tests live
 //! next to the code they test in `core/` (geometry, prediction, LDM, behaviour).
+//!
+//! Since Step 3 the security tests run the real ECDSA P-256 certificates,
+//! verifier and CA logic; only the key storage is simulated (`roadmesh_sim::keys`).
 
 #![allow(clippy::panic)] // test code: a failed precondition should fail the test loudly
-
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use roadmesh_core::auth::{AuthError, Signer, Verifier};
 use roadmesh_core::behavior::Subject;
 use roadmesh_core::config::Config;
 use roadmesh_core::geo::GeoOrigin;
 use roadmesh_core::obu::{DriveState, Obu, OwnState, RxOutcome};
+use roadmesh_core::pki::{CertVerifier, MisbehaviourReport, PseudonymSigner, ReportReason};
 use roadmesh_core::prediction::Motion;
-use roadmesh_core::rsm::{self, EventCode, Frame, MsgType, Rsm, VehicleType};
-use roadmesh_sim::pki::{Ca, DemoSigner, DemoVerifier};
+use roadmesh_core::rsm::{self, EventCode, Frame, MsgType, Rsm, TempId, VehicleType};
+use roadmesh_server::ca::ReportOutcome;
+use roadmesh_sim::keys::{self, SimCa, SoftKeys};
+use roadmesh_sim::rng::SimRng;
 use roadmesh_sim::scenarios;
 use roadmesh_sim::world::{Options, World};
 
-fn ca() -> Rc<RefCell<Ca>> {
-    Rc::new(RefCell::new(Ca::new(1, 3)))
+struct Pki {
+    ca: SimCa,
+    rng: SimRng,
+}
+
+impl Pki {
+    fn new() -> Self {
+        let mut rng = SimRng::new(1);
+        let ca = keys::new_ca(&mut rng, Config::reference());
+        Self { ca, rng }
+    }
+    fn phone(&mut self, certs: usize) -> PseudonymSigner<SoftKeys> {
+        keys::enrol(&mut self.ca, &mut self.rng, certs, 0)
+    }
+    fn verifier(&self) -> CertVerifier {
+        CertVerifier::new(&[self.ca.trust_anchor()], &Config::reference().security)
+            .unwrap_or_else(|_| panic!("anchor"))
+    }
+}
+
+fn id(s: &mut PseudonymSigner<SoftKeys>, t: f64) -> TempId {
+    s.current_temp_id(t)
+        .unwrap_or_else(|| panic!("no certificate"))
 }
 
 fn body(temp_id: [u8; 4], speed: f64) -> [u8; rsm::BODY_LEN] {
-    let (lat, lon) = GeoOrigin::phnom_penh().to_latlon(-40.0, -1.5);
+    body_at(temp_id, speed, 1.0, 1, -40.0)
+}
+
+fn body_at(temp_id: [u8; 4], speed: f64, t: f64, msg_id: u16, x: f64) -> [u8; rsm::BODY_LEN] {
+    let (lat, lon) = GeoOrigin::phnom_penh().to_latlon(x, -1.5);
     Rsm {
         msg_type: MsgType::Heartbeat,
         temp_id,
-        msg_id: 1,
-        timestamp_ms: rsm::ms_of_hour(1.0),
+        msg_id,
+        timestamp_ms: rsm::ms_of_hour(t),
         lat_deg: lat,
         lon_deg: lon,
         speed,
@@ -46,80 +74,120 @@ fn body(temp_id: [u8; 4], speed: f64) -> [u8; rsm::BODY_LEN] {
     .encode()
 }
 
+fn sign(s: &mut PseudonymSigner<SoftKeys>, t: f64, b: &[u8; rsm::BODY_LEN]) -> Vec<u8> {
+    s.sign(t, false, b).unwrap_or_else(|| panic!("cannot sign"))
+}
+
 // ---------------------------------------------------------------- SecurityTests
 
 #[test]
 fn valid_message_accepted() {
-    let ca = ca();
-    let cred = ca.borrow_mut().issue(1)[0];
-    let mut signer = DemoSigner::new(vec![cred], 300.0);
-    let b = body(cred.cert_id, 10.0);
-    let auth = signer.sign(&cred.cert_id, &rsm::signing_bytes(&b));
-    assert_eq!(
-        DemoVerifier::new(ca, true).verify(&cred.cert_id, &rsm::signing_bytes(&b), &auth),
-        Ok(())
-    );
+    let mut pki = Pki::new();
+    let mut phone = pki.phone(1);
+    let b = body(id(&mut phone, 1.0), 10.0);
+    let auth = sign(&mut phone, 1.0, &b);
+    assert_eq!(pki.verifier().verify(1.0, &b, &auth), Ok(()));
 }
 
 #[test]
 fn tampered_payload_rejected() {
-    let ca = ca();
-    let cred = ca.borrow_mut().issue(1)[0];
-    let mut signer = DemoSigner::new(vec![cred], 300.0);
-    let auth = signer.sign(
-        &cred.cert_id,
-        &rsm::signing_bytes(&body(cred.cert_id, 10.0)),
-    );
-    let tampered = body(cred.cert_id, 30.0);
+    let mut pki = Pki::new();
+    let mut phone = pki.phone(1);
+    let tid = id(&mut phone, 1.0);
+    let auth = sign(&mut phone, 1.0, &body(tid, 10.0));
     assert_eq!(
-        DemoVerifier::new(ca, true).verify(&cred.cert_id, &rsm::signing_bytes(&tampered), &auth),
+        pki.verifier().verify(1.0, &body(tid, 30.0), &auth),
         Err(AuthError::BadSignature)
     );
 }
 
 #[test]
 fn unknown_certificate_rejected() {
-    let b = body(*b"ffff", 10.0);
+    // forged: a certificate from a CA key the app does not trust
+    let mut pki = Pki::new();
+    let mut forger = keys::rogue_signer(&mut pki.rng, 1, 0);
+    let b = body(id(&mut forger, 1.0), 10.0);
+    let auth = sign(&mut forger, 1.0, &b);
     assert_eq!(
-        DemoVerifier::new(ca(), true).verify(b"ffff", &rsm::signing_bytes(&b), &[0; 32]),
-        Err(AuthError::UnknownCertificate)
+        pki.verifier().verify(1.0, &b, &auth),
+        Err(AuthError::BadCertificate)
+    );
+    // garbage auth bytes
+    assert_eq!(
+        pki.verifier().verify(1.0, &b, &[0; 32]),
+        Err(AuthError::MalformedAuth)
     );
 }
 
 #[test]
 fn temp_id_must_match_certificate() {
     // Signing with my key while claiming someone else's pseudonym fails verification.
-    let ca = ca();
-    let creds = ca.borrow_mut().issue(2);
-    let (mine, victim) = (creds[0], creds[1]);
-    let claimed = body(victim.cert_id, 10.0);
-    let auth =
-        DemoSigner::new(vec![mine], 300.0).sign(&mine.cert_id, &rsm::signing_bytes(&claimed));
+    // (The reference reports BadSignature; the certificate binding catches it first.)
+    let mut pki = Pki::new();
+    let mut mine = pki.phone(1);
+    let mut victim = pki.phone(1);
+    let my_auth = {
+        let b = body(id(&mut mine, 1.0), 10.0);
+        sign(&mut mine, 1.0, &b)
+    };
+    let claimed = body(id(&mut victim, 1.0), 10.0);
     assert_eq!(
-        DemoVerifier::new(ca, true).verify(&victim.cert_id, &rsm::signing_bytes(&claimed), &auth),
-        Err(AuthError::BadSignature)
+        pki.verifier().verify(1.0, &claimed, &my_auth),
+        Err(AuthError::TempIdMismatch)
     );
+    assert!(mine.sign(1.0, false, &claimed).is_none()); // my signer refuses
+}
+
+/// Three independent phones report `evil` with signed evidence; returns the last outcome.
+fn report_three_times(pki: &mut Pki, evil: &mut PseudonymSigner<SoftKeys>) -> Vec<ReportOutcome> {
+    let tid = id(evil, 1.0);
+    let b = body(tid, 95.0); // 342 km/h
+    let proof = Frame {
+        last_hop: None,
+        body: b,
+        auth: sign(evil, 1.0, &b),
+    };
+    let mut out = Vec::new();
+    for _ in 0..3 {
+        let mut reporter = pki.phone(1);
+        let r = MisbehaviourReport::build(
+            &mut reporter,
+            1.0,
+            ReportReason::ImplausibleSpeed,
+            vec![proof.clone()],
+        )
+        .and_then(|r| r.encode())
+        .unwrap_or_else(|| panic!("report"));
+        out.push(pki.ca.report(&r, 1).unwrap_or_else(|e| panic!("{e:?}")));
+    }
+    out
 }
 
 #[test]
 fn revocation() {
-    let ca = ca();
-    let cred = ca.borrow_mut().issue(1)[0];
-    for reporter in ["CarA", "CarB", "CarC"] {
-        ca.borrow_mut().report(&cred.cert_id, reporter);
-    }
-    let b = body(cred.cert_id, 10.0);
-    let auth = DemoSigner::new(vec![cred], 300.0).sign(&cred.cert_id, &rsm::signing_bytes(&b));
+    let mut pki = Pki::new();
+    let mut evil = pki.phone(1);
+    let tid = id(&mut evil, 1.0);
+    let ok = body(tid, 10.0);
+    let auth = sign(&mut evil, 1.0, &ok);
+    let mut v = pki.verifier();
+    assert_eq!(v.verify(1.0, &ok, &auth), Ok(()));
+    report_three_times(&mut pki, &mut evil);
+    let crl = pki
+        .ca
+        .revocation_list(2, 86_400)
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    assert!(v.load_revocation_list(&crl).is_ok());
     assert_eq!(
-        DemoVerifier::new(ca, true).verify(&cred.cert_id, &rsm::signing_bytes(&b), &auth),
+        v.verify(1.0, &ok, &auth),
         Err(AuthError::RevokedCertificate)
     );
 }
 
 #[test]
 fn pseudonym_rotation() {
-    let creds = ca().borrow_mut().issue(3);
-    let mut s = DemoSigner::new(creds, 300.0);
+    let mut pki = Pki::new();
+    let mut s = pki.phone(3);
     assert_ne!(s.current_temp_id(0.0), s.current_temp_id(301.0));
 }
 
@@ -325,10 +393,11 @@ fn own_at(x: f64) -> OwnState {
 
 #[test]
 fn relay_cannot_alter_message() {
-    let ca = ca();
-    let cred = ca.borrow_mut().issue(1)[0];
-    let signed = body(cred.cert_id, 10.0);
-    let auth = DemoSigner::new(vec![cred], 300.0).sign(&cred.cert_id, &rsm::signing_bytes(&signed));
+    let mut pki = Pki::new();
+    let mut phone = pki.phone(1);
+    let tid = id(&mut phone, 1.0);
+    let signed = body(tid, 10.0);
+    let auth = sign(&mut phone, 1.0, &signed);
     // a relay changes the speed but keeps the originator's signature
     let mut forged = Rsm::decode(&signed).unwrap_or_else(|_| panic!("decode"));
     forged.speed = 0.0;
@@ -339,7 +408,7 @@ fn relay_cannot_alter_message() {
         auth,
     };
     let mut obu = Obu::new(Config::reference(), GeoOrigin::phnom_penh(), true);
-    let out = obu.receive(&frame, 1.0, &own_at(-80.0), &DemoVerifier::new(ca, true));
+    let out = obu.receive(&frame, 1.0, &own_at(-80.0), &mut pki.verifier());
     assert!(matches!(
         out,
         RxOutcome::AuthFailed {
@@ -347,37 +416,69 @@ fn relay_cannot_alter_message() {
             ..
         }
     ));
-    assert!(obu.ldm().get(&cred.cert_id).is_none());
+    assert!(obu.ldm().get(&tid).is_none());
     assert!(obu.pending_relays().is_empty()); // and it is not forwarded
 }
 
 #[test]
 fn revocation_needs_independent_reporters() {
-    let ca = ca();
-    let cid = ca.borrow_mut().issue(1)[0].cert_id;
-    assert!(!ca.borrow_mut().report(&cid, "CarA"));
-    assert!(!ca.borrow_mut().report(&cid, "CarA")); // same reporter twice: still no
-    assert!(!ca.borrow_mut().report(&cid, "CarB"));
-    assert!(ca.borrow_mut().report(&cid, "CarC")); // third independent reporter
-    assert!(ca.borrow().revoked.contains(&cid));
+    let mut pki = Pki::new();
+    let mut evil = pki.phone(1);
+    let tid = id(&mut evil, 1.0);
+    let b = body(tid, 95.0);
+    let proof = Frame {
+        last_hop: None,
+        body: b,
+        auth: sign(&mut evil, 1.0, &b),
+    };
+    let file = |reporter: &mut PseudonymSigner<SoftKeys>, ca: &mut SimCa, t: f64| {
+        let r = MisbehaviourReport::build(
+            reporter,
+            t,
+            ReportReason::ImplausibleSpeed,
+            vec![proof.clone()],
+        )
+        .and_then(|r| r.encode())
+        .unwrap_or_else(|| panic!("report"));
+        ca.report(&r, 1)
+    };
+    let mut car_a = pki.phone(3);
+    let mut car_b = pki.phone(1);
+    let mut car_c = pki.phone(1);
+    assert_eq!(
+        file(&mut car_a, &mut pki.ca, 1.0),
+        Ok(ReportOutcome::Counted(1))
+    );
+    // same phone again, even under another pseudonym: still one reporter
+    assert_eq!(
+        file(&mut car_a, &mut pki.ca, 301.0),
+        Ok(ReportOutcome::Counted(1))
+    );
+    assert_eq!(
+        file(&mut car_b, &mut pki.ca, 1.0),
+        Ok(ReportOutcome::Counted(2))
+    );
+    assert_eq!(
+        file(&mut car_c, &mut pki.ca, 1.0),
+        Ok(ReportOutcome::Revoked)
+    ); // third independent reporter
+    let d = evil.certificates()[0].digest();
+    assert!(pki.ca.is_revoked(&d));
 }
 
 #[test]
 fn message_flood_is_rejected() {
-    let ca = ca();
-    let cred = ca.borrow_mut().issue(1)[0];
-    let mut signer = DemoSigner::new(vec![cred], 300.0);
-    let verifier = DemoVerifier::new(ca, true);
+    let mut pki = Pki::new();
+    let mut phone = pki.phone(1);
+    let mut verifier = pki.verifier();
     let mut obu = Obu::new(Config::reference(), GeoOrigin::phnom_penh(), false);
     let me = own_at(-80.0);
+    let tid = id(&mut phone, 1.0);
     for i in 0..5u16 {
         // 5 messages 10 ms apart = 100 msg/s
         let t = 1.0 + f64::from(i) * 0.01;
-        let (lat, lon) = GeoOrigin::phnom_penh().to_latlon(-40.0 + f64::from(i) * 0.1, -1.5);
-        let mut r = Rsm::decode(&body(cred.cert_id, 10.0)).unwrap_or_else(|_| panic!("decode"));
-        (r.msg_id, r.timestamp_ms, r.lat_deg, r.lon_deg) = (i + 1, rsm::ms_of_hour(t), lat, lon);
-        let b = r.encode();
-        let auth = signer.sign(&cred.cert_id, &rsm::signing_bytes(&b));
+        let b = body_at(tid, 10.0, t, i + 1, -40.0 + f64::from(i) * 0.1);
+        let auth = sign(&mut phone, t, &b);
         obu.receive(
             &Frame {
                 last_hop: None,
@@ -386,11 +487,19 @@ fn message_flood_is_rejected() {
             },
             t,
             &me,
-            &verifier,
+            &mut verifier,
         );
     }
-    assert!(obu.blocked().contains(&cred.cert_id));
-    assert!(obu.ldm().get(&cred.cert_id).is_none());
+    assert!(obu.blocked().contains(&tid));
+    assert!(obu.ldm().get(&tid).is_none());
+    // the phone kept signed proof for its report, and the CA can confirm it
+    let evidence = obu.take_evidence(&tid);
+    assert_eq!(evidence.len(), 2);
+    let mut reporter = pki.phone(1);
+    let r = MisbehaviourReport::build(&mut reporter, 1.05, ReportReason::RateTooHigh, evidence)
+        .and_then(|r| r.encode())
+        .unwrap_or_else(|| panic!("report"));
+    assert_eq!(pki.ca.report(&r, 1), Ok(ReportOutcome::Counted(1)));
 }
 
 #[test]

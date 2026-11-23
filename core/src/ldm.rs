@@ -167,6 +167,12 @@ impl Ldm {
         Check::Ok
     }
 
+    /// Has this exact message (temp_id, msg_id) already been accepted? Lets the
+    /// phone drop relayed copies before spending time on the signature check.
+    pub fn has_seen(&self, temp_id: &TempId, msg_id: u16) -> bool {
+        self.seen.contains_key(&(*temp_id, msg_id))
+    }
+
     /// Store an accepted message.
     pub fn update(&mut self, msg: PeerMsg, now: f64, hops: u8) {
         self.seen.insert((msg.temp_id, msg.msg_id), now);

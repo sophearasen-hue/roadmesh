@@ -15,13 +15,15 @@ Peer-to-peer road safety for every vehicle — cars, motorbikes, tuk-tuks — on
 | `docs/AUDIT.md` | 44 design checks, 27 security controls, 20 store checks | Used at every step |
 | `CLAUDE.md` | Rules Claude Code reads at the start of every session | Keep at the top level |
 | `SECURITY.md` | How to report a vulnerability | Publish with the app |
-| `core/` | Rust safety core (pure logic, no I/O): RSM codec, LDM, prediction, alerts, behaviour | Step 2: reference port + SPEC v0.1 profile |
-| `sim/` | Rust simulator: the 5 reference scenarios, golden tests, spec-profile tests | Step 2 (traffic mix in Step 4) |
-| `server/` | Rust edge server | Skeleton (Step 9) |
+| `core/` | Rust safety core (pure logic, no I/O): RSM codec, LDM, prediction, alerts, behaviour, pseudonym certificates and signature checks | Step 2: reference port + SPEC v0.1 profile; Step 3: ECDSA P-256 |
+| `sim/` | Rust simulator: the 5 reference scenarios, golden tests, spec-profile tests; runs the real crypto with software keys | Step 2–3 (traffic mix in Step 4) |
+| `server/` | Rust edge server: certificate authority logic (issuance limits, reports, revocation list) | Step 3 logic; network, KMS/HSM, attestation in Step 9 |
+| `fuzz/` | cargo-fuzz targets for every parser of untrusted bytes | Step 3; 5 min per PR, 24 h per release |
+| `docs/RELEASE.md` | Release checklist (24 h fuzz run, secret scan, trust anchors) | Updated as steps add gates |
 | `docs/DECISIONS.md` | Decisions taken during the build | Updated each step |
 | `app/` | Flutter app, strings in `lib/l10n/app_en.arb` / `app_km.arb` | Skeleton (Step 8) |
 | `ios/`, `android/` | Swift / Kotlin radio, keys, CarPlay | Placeholders (Steps 5, 6, 10) |
-| `.github/workflows/ci.yml` | CI: Rust fmt/clippy/test, cargo audit, Flutter analyze/test, gitleaks, reference guard + tests | Runs on every push |
+| `.github/workflows/ci.yml` | CI: Rust fmt/clippy/test, cargo audit, Flutter analyze/test, gitleaks, fuzz smoke test, reference guard + tests | Runs on every push |
 | `scripts/check-reference.sh` | Fails if anything under `reference/` changes (checksums in `docs/reference.sha256`) | Runs in CI |
 
 ## Quick start
