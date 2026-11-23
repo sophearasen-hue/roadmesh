@@ -9,6 +9,8 @@
 
 pub mod config;
 pub mod geo;
+pub mod geometry;
+pub mod prediction;
 pub mod rsm;
 
 /// Version of the core, reported to the app and in test reports.
