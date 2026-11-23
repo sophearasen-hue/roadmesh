@@ -10,6 +10,7 @@
 use std::collections::HashSet;
 
 use crate::auth::{AuthError, Signer, Verifier};
+use crate::behavior::{BehaviorMonitor, Observation, SpeedLimits, Subject};
 use crate::config::Config;
 use crate::geo::{GeoOrigin, math_to_compass_deg};
 use crate::ldm::{Check, Ldm, Misbehaviour, PeerMsg};
@@ -223,6 +224,7 @@ pub struct Obu {
     state: DriveState,
     yield_to: Option<TempId>,
     hazard_mem: Option<(f64, PeerMsg, u8)>,
+    behavior: BehaviorMonitor,
 }
 
 /// Relation of `other` to my path (reference `relation`).
@@ -259,6 +261,7 @@ impl Obu {
             state: DriveState::Cruise,
             yield_to: None,
             hazard_mem: None,
+            behavior: BehaviorMonitor::new(),
         }
     }
 
@@ -280,6 +283,11 @@ impl Obu {
     /// Pseudonyms this phone has used.
     pub fn own_ids(&self) -> &HashSet<TempId> {
         &self.own_ids
+    }
+
+    /// The behaviour recorder (own vehicle + every peer heard).
+    pub fn behavior(&self) -> &BehaviorMonitor {
+        &self.behavior
     }
 
     /// Frames queued for forwarding (cleared by [`Obu::transmit`]).
@@ -566,8 +574,15 @@ impl Obu {
 
     // ------------------------------------------------------------ decide
 
-    /// Run all safety applications for this cycle.
-    pub fn decide(&mut self, now: f64, own: &OwnState, _road: &RoadContext) -> Decision {
+    /// Run all safety applications for this cycle (`dt` = time since the last cycle).
+    pub fn decide(
+        &mut self,
+        now: f64,
+        dt: f64,
+        own: &OwnState,
+        _road: &RoadContext,
+        limits: &dyn SpeedLimits,
+    ) -> Decision {
         let c = self.cfg.clone();
         self.ldm.evict(now, &c);
         let me = own.motion;
@@ -722,6 +737,27 @@ impl Obu {
         {
             self.state = DriveState::Advise;
         }
+
+        let me_obs = Observation {
+            who: Subject::Me,
+            t: now,
+            motion: me,
+            length: dims.0,
+            vehicle_type: own.vehicle_type,
+        };
+        let peers: Vec<Observation> = self
+            .ldm
+            .entries()
+            .iter()
+            .map(|e| Observation {
+                who: Subject::Peer(e.msg.temp_id),
+                t: e.msg.t,
+                motion: e.msg.motion,
+                length: e.msg.length,
+                vehicle_type: e.msg.vehicle_type,
+            })
+            .collect();
+        self.behavior.observe(&c, now, dt, me_obs, &peers, limits);
 
         let alerts = self.reference_alerts(
             &me,
@@ -905,8 +941,20 @@ mod tests {
         let sa = own(-30.0, -1.5, 0.0, 13.9);
         let sb = own(1.5, -30.0, FRAC_PI_2, 13.9);
         exchange(&mut a, &sa, &mut b, &sb, 0.0);
-        let da = a.decide(0.0, &sa, &RoadContext::default());
-        let db = b.decide(0.0, &sb, &RoadContext::default());
+        let da = a.decide(
+            0.0,
+            0.1,
+            &sa,
+            &RoadContext::default(),
+            &crate::behavior::NoLimits,
+        );
+        let db = b.decide(
+            0.0,
+            0.1,
+            &sb,
+            &RoadContext::default(),
+            &crate::behavior::NoLimits,
+        );
         assert_eq!(da.state, DriveState::Yield);
         assert_eq!(da.alerts[0].level, Level::Danger);
         assert_eq!(da.alerts[0].kind, AlertKind::CrossingConflict);

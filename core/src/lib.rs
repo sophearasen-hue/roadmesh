@@ -8,6 +8,7 @@
 //! `reference/core-python` arrives in Step 2.
 
 pub mod auth;
+pub mod behavior;
 pub mod config;
 pub mod geo;
 pub mod geometry;
