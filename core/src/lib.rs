@@ -8,6 +8,8 @@
 //! `reference/core-python` arrives in Step 2.
 
 pub mod config;
+pub mod geo;
+pub mod rsm;
 
 /// Version of the core, reported to the app and in test reports.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
