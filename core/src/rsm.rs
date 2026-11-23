@@ -34,8 +34,8 @@
 //! `[frame_version:1][flags:1][last_hop lat:4 lon:4, only if relayed][body:31][auth_len:1][auth:auth_len]`
 //!
 //! The frame header (last relay position) is outside the signature, like the
-//! ETSI GeoNetworking forwarding header. Step 3 finalises the security envelope
-//! (signature, certificate digest) carried in `auth`.
+//! ETSI GeoNetworking forwarding header. `auth` carries the security envelope of
+//! [`crate::pki`]: signature plus certificate digest (73 bytes) or full certificate (172).
 
 /// Body length in bytes.
 pub const BODY_LEN: usize = 31;
@@ -43,8 +43,9 @@ pub const BODY_LEN: usize = 31;
 pub const VERSION: u8 = 0;
 /// Current frame version.
 pub const FRAME_VERSION: u8 = 0;
-/// Largest `auth` field accepted (bytes). ECDSA P-256 signature (64) + digest (8) fits.
-pub const MAX_AUTH_LEN: usize = 128;
+/// Largest `auth` field accepted (bytes): kind (1) + ECDSA P-256 signature (64) +
+/// full certificate (107) = 172, rounded up (SPEC §3, user decision Step 3).
+pub const MAX_AUTH_LEN: usize = 176;
 /// Milliseconds in one hour: timestamps wrap at this value.
 pub const MS_PER_HOUR: u32 = 3_600_000;
 
@@ -327,7 +328,7 @@ pub struct Frame {
     pub last_hop: Option<(f64, f64)>,
     /// The RSM body exactly as signed by the originator (plus relay-mutable fields).
     pub body: [u8; BODY_LEN],
-    /// Authentication bytes (signature etc.). Format fixed in Step 3.
+    /// Authentication bytes: the [`crate::pki::AuthEnvelope`].
     pub auth: Vec<u8>,
 }
 

@@ -7,8 +7,15 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[lib]
+name = "roadmesh_server"
+
 [dependencies]
 roadmesh-core = { path = "../core" }
+
+[dev-dependencies]
+# Tests generate throwaway CA and device keys from the OS random source at run time.
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "getrandom"] }
 
 [lints]
 workspace = true
