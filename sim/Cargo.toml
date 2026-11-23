@@ -8,9 +8,10 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-hmac = "0.13.0"
+# precomputed-tables: ~2x faster verification for the many simulated phones (needs std)
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "precomputed-tables", "std"] }
 roadmesh-core = { path = "../core" }
-sha2 = "0.11.1"
+roadmesh-server = { path = "../server" }
 
 [lints]
 workspace = true

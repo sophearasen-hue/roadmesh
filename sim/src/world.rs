@@ -7,11 +7,10 @@
 //! warning with no reaction delay; it lives only in the simulator. The product
 //! warns and never brakes (CLAUDE.md).
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::f64::consts::PI;
-use std::rc::Rc;
 
+use roadmesh_core::auth::Signer;
 use roadmesh_core::behavior::SpeedLimits;
 use roadmesh_core::config::Config;
 use roadmesh_core::geo::{GeoOrigin, math_to_compass_deg};
@@ -22,7 +21,12 @@ use roadmesh_core::obu::{
 use roadmesh_core::prediction::{Motion, first_conflict, trajectory};
 use roadmesh_core::rsm::{self, EventCode, Frame, MsgType, Rsm, TempId, VehicleType};
 
-use crate::pki::{Ca, Credential, DemoSigner, DemoVerifier, demo_mac};
+use roadmesh_core::pki::{
+    CertDigest, CertVerifier, MisbehaviourReport, PseudonymSigner, ReportReason,
+};
+use roadmesh_server::ca::ReportOutcome;
+
+use crate::keys::{SimCa, SimVerifier, SoftKeys, new_ca};
 use crate::rng::SimRng;
 
 /// Simulation step (s): 10 Hz, the standard message rate.
@@ -37,10 +41,6 @@ pub const HUMAN_HAZARD_TTC_S: f64 = 3.0;
 pub const CRUISE_ACCEL: f64 = 1.5;
 /// Hardest braking a vehicle can do (m/s²).
 pub const MAX_BRAKE: f64 = -8.0;
-/// Pseudonym rotation period (s).
-pub const PSEUDONYM_ROTATE_S: f64 = 300.0;
-/// Independent reporters needed for revocation.
-pub const REVOKE_AFTER_REPORTS: usize = 3;
 const SAFETY_MARGIN_M: f64 = 0.5;
 
 fn round6(v: f64) -> f64 {
@@ -270,8 +270,8 @@ pub struct GhostAttacker {
     speed: f64,
     t_start: f64,
     t_end: f64,
-    /// Credential: forged (unknown to the CA) or stolen (valid).
-    pub cred: Credential,
+    /// Signer: forged certificates (untrusted CA) or a stolen genuine phone.
+    pub signer: PseudonymSigner<SoftKeys>,
     msg_id: u16,
 }
 
@@ -286,7 +286,7 @@ impl GhostAttacker {
         speed: f64,
         t_start: f64,
         t_end: f64,
-        cred: Credential,
+        signer: PseudonymSigner<SoftKeys>,
     ) -> Self {
         Self {
             name: name.to_owned(),
@@ -296,7 +296,7 @@ impl GhostAttacker {
             speed,
             t_start,
             t_end,
-            cred,
+            signer,
             msg_id: 0,
         }
     }
@@ -318,11 +318,14 @@ impl GhostAttacker {
         let Some((x, y, h)) = self.ghost_pose(now) else {
             return Vec::new();
         };
+        let Some(temp_id) = self.signer.current_temp_id(now) else {
+            return Vec::new();
+        };
         self.msg_id = self.msg_id.wrapping_add(1);
         let (lat, lon) = origin.to_latlon(x, y);
         let body = Rsm {
             msg_type: MsgType::Heartbeat,
-            temp_id: self.cred.cert_id,
+            temp_id,
             msg_id: self.msg_id,
             timestamp_ms: rsm::ms_of_hour(now),
             lat_deg: lat,
@@ -340,10 +343,13 @@ impl GhostAttacker {
             event: EventCode::None,
         }
         .encode();
+        let Some(auth) = self.signer.sign(now, false, &body) else {
+            return Vec::new();
+        };
         vec![Frame {
             last_hop: None,
             body,
-            auth: demo_mac(&self.cred.key, &rsm::signing_bytes(&body)),
+            auth,
         }]
     }
 }
@@ -497,10 +503,12 @@ pub struct World {
     pub attackers: Vec<GhostAttacker>,
     /// Engines (index = vehicle index).
     pub obus: Vec<Option<Obu>>,
-    /// Shared demo CA.
-    pub ca: Rc<RefCell<Ca>>,
+    /// The certificate authority (real server logic, software key).
+    pub ca: SimCa,
     /// Which vehicle (or attacker) owns each pseudonym. Simulator bookkeeping only.
     pub cert_owner: HashMap<TempId, String>,
+    /// Same, by certificate digest.
+    pub digest_owner: HashMap<CertDigest, String>,
     /// Notable moments.
     pub moments: Vec<Moment>,
     /// Last decision per vehicle.
@@ -509,8 +517,8 @@ pub struct World {
     pub rng: SimRng,
     origin: GeoOrigin,
     drivers: Vec<HumanDriver>,
-    signers: Vec<Option<DemoSigner>>,
-    verifier: DemoVerifier,
+    signers: Vec<Option<PseudonymSigner<SoftKeys>>>,
+    verifiers: Vec<Option<SimVerifier>>,
     loss_rng: SimRng,
     pending: Vec<(usize, (f64, f64), Frame)>,
     tick: u64,
@@ -530,32 +538,42 @@ impl World {
         opts: Options,
         duration: f64,
     ) -> Self {
-        let ca = Rc::new(RefCell::new(Ca::new(
-            opts.seed + 1000,
-            REVOKE_AFTER_REPORTS,
-        )));
+        let mut ca_rng = SimRng::new(opts.seed + 1000);
+        let mut ca = new_ca(&mut ca_rng, opts.config.clone());
+        let anchor = ca.trust_anchor();
         let origin = GeoOrigin::phnom_penh();
         let mut cert_owner = HashMap::new();
+        let mut digest_owner = HashMap::new();
         let mut obus = Vec::new();
         let mut signers = Vec::new();
+        let mut verifiers = Vec::new();
         for v in &vehicles {
             if opts.v2v && v.has_obu {
-                let creds = ca.borrow_mut().issue(3);
-                for c in &creds {
-                    cert_owner.insert(c.cert_id, v.name.clone());
+                let signer = crate::keys::enrol(&mut ca, &mut ca_rng, 3, 0);
+                for c in signer.certificates() {
+                    cert_owner.insert(c.temp_id(), v.name.clone());
+                    digest_owner.insert(c.digest(), v.name.clone());
                 }
                 obus.push(Some(Obu::new(opts.config.clone(), origin, opts.relay)));
-                signers.push(Some(DemoSigner::new(creds, PSEUDONYM_ROTATE_S)));
+                signers.push(Some(signer));
+                verifiers.push(Some(if opts.security {
+                    match CertVerifier::new(&[anchor], &opts.config.security) {
+                        Ok(v) => SimVerifier::Real(Box::new(v)),
+                        Err(_) => SimVerifier::Off, // unreachable: the CA key is valid
+                    }
+                } else {
+                    SimVerifier::Off
+                }));
             } else {
                 obus.push(None);
                 signers.push(None);
+                verifiers.push(None);
             }
         }
         let n = vehicles.len();
         Self {
             t: 0.0,
             duration,
-            verifier: DemoVerifier::new(ca.clone(), opts.security),
             loss_rng: SimRng::new(opts.seed + 2000),
             rng: SimRng::new(opts.seed),
             vehicles,
@@ -569,6 +587,7 @@ impl World {
             obus,
             ca,
             cert_owner,
+            digest_owner,
             moments: Vec::new(),
             decisions: vec![None; n],
             origin,
@@ -580,6 +599,7 @@ impl World {
                 n
             ],
             signers,
+            verifiers,
             opts,
             pending: Vec::new(),
             tick: 0,
@@ -934,22 +954,45 @@ impl World {
                     continue;
                 }
                 self.radio.delivered += 1;
-                let Some(obu) = self.obus[r].as_mut() else {
+                let (Some(obu), Some(verifier)) =
+                    (self.obus[r].as_mut(), self.verifiers[r].as_mut())
+                else {
                     continue;
                 };
-                let out = obu.receive(&frame, now, &own, &self.verifier);
+                let out = obu.receive(&frame, now, &own, verifier);
                 if let RxOutcome::Misbehaviour {
                     temp_id,
+                    reason,
                     report: true,
-                    ..
                 } = out
                 {
-                    let reporter = self.vehicles[r].name.clone();
-                    if self.ca.borrow_mut().report(&temp_id, &reporter) {
+                    // the phone files a signed report with the evidence; the CA decides
+                    let evidence = obu.take_evidence(&temp_id);
+                    let report = self.signers[r].as_mut().and_then(|s| {
+                        MisbehaviourReport::build(s, now, ReportReason::from(reason), evidence)
+                    });
+                    let outcome = report
+                        .and_then(|rep| rep.encode())
+                        .map(|bytes| self.ca.report(&bytes, now.max(0.0) as u32));
+                    if let Some(Ok(ReportOutcome::Revoked)) = outcome {
                         let owner = self.owner(&temp_id);
                         self.moments.push(Moment::Revoked { t: now, owner });
+                        self.publish_revocation_list(now);
                     }
                 }
+            }
+        }
+    }
+
+    /// Every phone fetches the new revocation list at once (in reality: daily and on connection).
+    fn publish_revocation_list(&mut self, now: f64) {
+        let t = now.max(0.0) as u32;
+        let Ok(list) = self.ca.revocation_list(t, t + 86_400) else {
+            return;
+        };
+        for v in self.verifiers.iter_mut().flatten() {
+            if let SimVerifier::Real(v) = v {
+                let _ = v.load_revocation_list(&list);
             }
         }
     }
@@ -1011,9 +1054,14 @@ impl World {
                 .map(|(v, a)| (v.name.clone(), r1(-a.min(0.0))))
                 .collect(),
             revoked: {
-                let ca = self.ca.borrow();
-                let mut v: Vec<String> = ca.revoked.iter().map(|id| self.owner(id)).collect();
+                let mut v: Vec<String> = self
+                    .digest_owner
+                    .iter()
+                    .filter(|(d, _)| self.ca.is_revoked(d))
+                    .map(|(_, o)| o.clone())
+                    .collect();
                 v.sort();
+                v.dedup();
                 v
             },
             radio: self.radio,

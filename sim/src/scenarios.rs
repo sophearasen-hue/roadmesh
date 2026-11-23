@@ -5,7 +5,7 @@ use std::f64::consts::{FRAC_PI_2, PI};
 use roadmesh_core::geometry::rect;
 use roadmesh_core::rsm::VehicleType;
 
-use crate::pki::Credential;
+use crate::keys;
 use crate::world::{GhostAttacker, Options, Role, Vehicle, World, Zones};
 
 const KMH: f64 = 1.0 / 3.6;
@@ -75,11 +75,9 @@ pub fn ghost_attack(opts: Options) -> World {
     let a = Vehicle::new("CarA", -80.0, -1.5, 0.0, 50.0 * KMH);
     let mut w = World::new(vec![a], city_blocks(), opts, 12.0);
     w.zones = city();
-    let insider = w.ca.borrow_mut().issue(1);
-    let forged = Credential {
-        cert_id: w.rng.bytes::<4>(),
-        key: w.rng.bytes::<32>(),
-    };
+    // a stolen genuine phone (valid certificate) and an outsider with forged certificates
+    let insider = keys::enrol(&mut w.ca, &mut w.rng, 1, 0);
+    let forged = keys::rogue_signer(&mut w.rng, 1, 0);
     let attackers = vec![
         GhostAttacker::new(
             "Forger",
@@ -99,12 +97,15 @@ pub fn ghost_attack(opts: Options) -> World {
             95.0,
             2.0,
             4.5,
-            insider[0],
+            insider,
         ),
     ];
     for at in &attackers {
-        w.cert_owner
-            .insert(at.cred.cert_id, format!("ghost from {}", at.name));
+        for c in at.signer.certificates() {
+            let owner = format!("ghost from {}", at.name);
+            w.cert_owner.insert(c.temp_id(), owner.clone());
+            w.digest_owner.insert(c.digest(), owner);
+        }
     }
     w.attackers = attackers;
     w

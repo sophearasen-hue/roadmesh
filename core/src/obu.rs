@@ -514,7 +514,12 @@ impl Obu {
             Err(e) => return RxOutcome::Malformed(e),
         };
         if self.blocked.contains(&r.temp_id) {
-            return RxOutcome::Blocked; // cheap check first: no crypto for blocked senders
+            return RxOutcome::Blocked; // cheap checks first: no crypto for blocked senders
+        }
+        if self.ldm.has_seen(&r.temp_id, r.msg_id) {
+            // A copy of a message already verified and accepted (normal with relaying).
+            // Dropping a forged copy is harmless: only verified messages enter the cache.
+            return RxOutcome::Dropped;
         }
         let auth = if self.sample_skip(&r) {
             verifier.verify_certificate_only(now, &frame.body, &frame.auth)
@@ -1623,6 +1628,109 @@ mod tests {
             &mut FixedId(*b"EVIL"),
         );
         assert_eq!(a.receive(&f2[0], 0.1, &sa, &mut NoAuth), RxOutcome::Blocked);
+    }
+
+    #[test]
+    fn misbehaviour_keeps_signed_evidence_for_the_report() {
+        let o = GeoOrigin::phnom_penh();
+        let mut a = Obu::new(Config::reference(), o, false);
+        let sa = own(0.0, 0.0, 0.0, 10.0);
+        let mut b = Obu::new(Config::reference(), o, false);
+        let ok = b.transmit(
+            0.0,
+            &own(100.0, 0.0, 0.0, 10.0),
+            &RoadContext::default(),
+            &mut FixedId(*b"EVIL"),
+        );
+        assert!(matches!(
+            a.receive(&ok[0], 0.0, &sa, &mut NoAuth),
+            RxOutcome::Accepted { .. }
+        ));
+        let bad = b.transmit(
+            0.1,
+            &own(101.0, 0.0, 0.0, 95.0),
+            &RoadContext::default(),
+            &mut FixedId(*b"EVIL"),
+        );
+        assert!(matches!(
+            a.receive(&bad[0], 0.1, &sa, &mut NoAuth),
+            RxOutcome::Misbehaviour { report: true, .. }
+        ));
+        // the last good frame and the offending one, handed over once
+        assert_eq!(
+            a.take_evidence(b"EVIL"),
+            vec![ok[0].clone(), bad[0].clone()]
+        );
+        assert!(a.take_evidence(b"EVIL").is_empty());
+    }
+
+    /// Counts which check the OBU asked for.
+    #[derive(Default)]
+    struct Counting {
+        full: u32,
+        cert_only: u32,
+    }
+    impl Verifier for Counting {
+        fn verify(&mut self, _: f64, _: &[u8; rsm::BODY_LEN], _: &[u8]) -> Result<(), AuthError> {
+            self.full += 1;
+            Ok(())
+        }
+        fn verify_certificate_only(
+            &mut self,
+            _: f64,
+            _: &[u8; rsm::BODY_LEN],
+            _: &[u8],
+        ) -> Result<(), AuthError> {
+            self.cert_only += 1;
+            Ok(())
+        }
+    }
+
+    fn heartbeats_from(n_peers: u8, rounds: u16, cfg: Config) -> Counting {
+        let o = GeoOrigin::phnom_penh();
+        let mut a = Obu::new(cfg.clone(), o, false);
+        let sa = own(0.0, 0.0, 0.0, 10.0);
+        let mut senders: Vec<Obu> = (0..n_peers)
+            .map(|_| Obu::new(cfg.clone(), o, false))
+            .collect();
+        let mut v = Counting::default();
+        for k in 0..rounds {
+            let t = f64::from(k) * 0.1;
+            for (i, s) in senders.iter_mut().enumerate() {
+                let x = 10.0 * i as f64 + 10.0 * t; // each peer drives at 10 m/s
+                let id = [b'P', i as u8, 0, 0];
+                let f = s.transmit(
+                    t,
+                    &own(x, 50.0, 0.0, 10.0),
+                    &RoadContext::default(),
+                    &mut FixedId(id),
+                );
+                a.receive(&f[0], t, &sa, &mut v);
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn every_message_is_verified_by_default() {
+        let v = heartbeats_from(50, 8, Config::spec_v0());
+        assert_eq!(v.cert_only, 0);
+        assert_eq!(v.full, 400);
+    }
+
+    #[test]
+    fn sampling_when_enabled_checks_one_in_four_heartbeats_of_known_peers() {
+        let mut cfg = Config::spec_v0();
+        cfg.security.verify_sample_above_peers = Some(40);
+        let v = heartbeats_from(50, 8, cfg);
+        assert!(v.cert_only > 0, "sampling never engaged");
+        // never more than 3 of 4 heartbeats skip the signature check
+        assert!(
+            v.full * 3 >= v.cert_only,
+            "full {} cert-only {}",
+            v.full,
+            v.cert_only
+        );
     }
 
     #[test]
