@@ -79,7 +79,7 @@ jobs:
       - run: "$(go env GOPATH)/bin/gitleaks git --redact --verbose --exit-code 1 ."
 
   reference:
-    name: Reference engine (read-only guard + 26 tests)
+    name: Reference engine (read-only guard, golden file, 26 tests)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,6 +87,8 @@ jobs:
         with:
           python-version: "3.13"
       - run: scripts/check-reference.sh
+      - name: Golden outcomes match the reference
+        run: python scripts/golden_from_reference.py --check
       - name: Run reference tests
         working-directory: reference/core-python
         run: python -m unittest discover -s tests -t . -v
