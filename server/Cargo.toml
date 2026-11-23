@@ -1,0 +1,14 @@
+[package]
+name = "roadmesh-server"
+description = "Edge relay, certificate authority and hazard service (BUILD_PLAN Step 9)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+roadmesh-core = { path = "../core" }
+
+[lints]
+workspace = true

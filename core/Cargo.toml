@@ -1,0 +1,16 @@
+[package]
+name = "roadmesh-core"
+description = "RoadMesh safety core: RSM codec, LDM, tracker, prediction, alerts, scoring, security checks. Pure logic, no I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "roadmesh_core"
+
+[dependencies]
+
+[lints]
+workspace = true
