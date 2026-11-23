@@ -7,7 +7,15 @@
 //! Step 1 of `docs/BUILD_PLAN.md` creates the crate only. The port of
 //! `reference/core-python` arrives in Step 2.
 
+pub mod auth;
+pub mod behavior;
 pub mod config;
+pub mod geo;
+pub mod geometry;
+pub mod ldm;
+pub mod obu;
+pub mod prediction;
+pub mod rsm;
 
 /// Version of the core, reported to the app and in test reports.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

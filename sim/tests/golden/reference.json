@@ -1,0 +1,365 @@
+{
+ "blind_intersection/off": {
+  "blocked_by": {},
+  "collisions": [
+   {
+    "a": "CarA",
+    "b": "CarB",
+    "t": 5.6
+   }
+  ],
+  "hazards": [],
+  "max_brake_ms2": {},
+  "min_speed_kmh": {
+   "CarA": 0.0,
+   "CarB": 0.0
+  },
+  "revoked": 0,
+  "yields": []
+ },
+ "blind_intersection/on": {
+  "blocked_by": {
+   "CarA": 0,
+   "CarB": 0
+  },
+  "collisions": [],
+  "hazards": [],
+  "max_brake_ms2": {
+   "CarA": 1.5,
+   "CarB": -0.0
+  },
+  "min_speed_kmh": {
+   "CarA": 30.6,
+   "CarB": 50.0
+  },
+  "revoked": 0,
+  "yields": [
+   {
+    "car": "CarA",
+    "t": 1.7,
+    "target": "CarB"
+   }
+  ]
+ },
+ "emergency_brake/off": {
+  "blocked_by": {},
+  "collisions": [
+   {
+    "a": "Car1",
+    "b": "Car2",
+    "t": 4.1
+   },
+   {
+    "a": "Car2",
+    "b": "Car3",
+    "t": 4.7
+   }
+  ],
+  "hazards": [],
+  "max_brake_ms2": {},
+  "min_speed_kmh": {
+   "Car1": 0.0,
+   "Car2": 0.0,
+   "Car3": 0.0
+  },
+  "revoked": 0,
+  "yields": []
+ },
+ "emergency_brake/on": {
+  "blocked_by": {
+   "Car1": 0,
+   "Car2": 0,
+   "Car3": 0
+  },
+  "collisions": [],
+  "hazards": [
+   {
+    "car": "Car3",
+    "gap": 15.9,
+    "hops": 0,
+    "t": 4.8
+   }
+  ],
+  "max_brake_ms2": {
+   "Car1": 8.0,
+   "Car2": 8.0,
+   "Car3": 8.0
+  },
+  "min_speed_kmh": {
+   "Car1": 0.0,
+   "Car2": 0.0,
+   "Car3": 0.0
+  },
+  "revoked": 0,
+  "yields": [
+   {
+    "car": "Car2",
+    "t": 1.6,
+    "target": "Car1"
+   },
+   {
+    "car": "Car3",
+    "t": 1.6,
+    "target": "Car1"
+   }
+  ]
+ },
+ "ghost_attack/nosec": {
+  "blocked_by": {
+   "CarA": 1
+  },
+  "collisions": [],
+  "hazards": [],
+  "max_brake_ms2": {
+   "CarA": 1.5
+  },
+  "min_speed_kmh": {
+   "CarA": 30.6
+  },
+  "revoked": 0,
+  "yields": [
+   {
+    "car": "CarA",
+    "t": 1.7,
+    "target": "ghost from Forger"
+   }
+  ]
+ },
+ "ghost_attack/off": {
+  "blocked_by": {},
+  "collisions": [],
+  "hazards": [],
+  "max_brake_ms2": {
+   "CarA": -0.0
+  },
+  "min_speed_kmh": {
+   "CarA": 50.0
+  },
+  "revoked": 0,
+  "yields": []
+ },
+ "ghost_attack/on": {
+  "blocked_by": {
+   "CarA": 1
+  },
+  "collisions": [],
+  "hazards": [],
+  "max_brake_ms2": {
+   "CarA": -0.0
+  },
+  "min_speed_kmh": {
+   "CarA": 50.0
+  },
+  "revoked": 0,
+  "yields": []
+ },
+ "highway_relay/direct": {
+  "blocked_by": {
+   "CarA": 0,
+   "Relay1": 0,
+   "Relay10": 0,
+   "Relay11": 0,
+   "Relay2": 0,
+   "Relay3": 0,
+   "Relay4": 0,
+   "Relay5": 0,
+   "Relay6": 0,
+   "Relay7": 0,
+   "Relay8": 0,
+   "Relay9": 0,
+   "Stop1": 0,
+   "Stop2": 0,
+   "Stop3": 0
+  },
+  "collisions": [],
+  "hazards": [
+   {
+    "car": "CarA",
+    "gap": 295.1,
+    "hops": 0,
+    "t": 32.8
+   }
+  ],
+  "max_brake_ms2": {
+   "CarA": 2.7
+  },
+  "min_speed_kmh": {
+   "CarA": 4.7
+  },
+  "revoked": 0,
+  "yields": []
+ },
+ "highway_relay/off": {
+  "blocked_by": {},
+  "collisions": [
+   {
+    "a": "CarA",
+    "b": "Stop3",
+    "t": 41.5
+   }
+  ],
+  "hazards": [],
+  "max_brake_ms2": {},
+  "min_speed_kmh": {
+   "CarA": 0.0
+  },
+  "revoked": 0,
+  "yields": []
+ },
+ "highway_relay/on": {
+  "blocked_by": {
+   "CarA": 0,
+   "Relay1": 0,
+   "Relay10": 0,
+   "Relay11": 0,
+   "Relay2": 0,
+   "Relay3": 0,
+   "Relay4": 0,
+   "Relay5": 0,
+   "Relay6": 0,
+   "Relay7": 0,
+   "Relay8": 0,
+   "Relay9": 0,
+   "Stop1": 0,
+   "Stop2": 0,
+   "Stop3": 0
+  },
+  "collisions": [],
+  "hazards": [
+   {
+    "car": "CarA",
+    "gap": 1461.4,
+    "hops": 5,
+    "t": 0.5
+   }
+  ],
+  "max_brake_ms2": {
+   "CarA": 1.2
+  },
+  "min_speed_kmh": {
+   "CarA": 14.7
+  },
+  "revoked": 0,
+  "yields": []
+ },
+ "mixed_traffic/off": {
+  "blocked_by": {},
+  "collisions": [],
+  "hazards": [],
+  "max_brake_ms2": {
+   "CarA": 0.6,
+   "Jerky": 6.0,
+   "Moto": 2.5,
+   "Speeder": 3.5,
+   "Tailgater": 1.6,
+   "Truck": -0.0,
+   "Van": 2.5
+  },
+  "min_speed_kmh": {
+   "CarA": 40.0,
+   "Jerky": 40.0,
+   "Moto": 40.1,
+   "Speeder": 39.9,
+   "Tailgater": 36.0,
+   "Truck": 40.0,
+   "Van": 40.1
+  },
+  "revoked": 0,
+  "yields": []
+ },
+ "mixed_traffic/on": {
+  "behaviour_carA": {
+   "CarA": {
+    "harsh_accels": 0,
+    "harsh_brakes": 0,
+    "oncoming_overtakes": 0,
+    "over_limit_s": 0.0,
+    "overtaken": 1,
+    "overtakes": 0,
+    "score": 100,
+    "tailgate_s": 0.0
+   },
+   "Jerky": {
+    "harsh_accels": 1,
+    "harsh_brakes": 1,
+    "oncoming_overtakes": 0,
+    "over_limit_s": 1.0,
+    "overtaken": 0,
+    "overtakes": 0,
+    "score": 86,
+    "tailgate_s": 0.0
+   },
+   "Speeder": {
+    "harsh_accels": 0,
+    "harsh_brakes": 0,
+    "oncoming_overtakes": 3,
+    "over_limit_s": 37.4,
+    "overtaken": 0,
+    "overtakes": 3,
+    "score": 51,
+    "tailgate_s": 0.0
+   },
+   "Tailgater": {
+    "harsh_accels": 0,
+    "harsh_brakes": 0,
+    "oncoming_overtakes": 0,
+    "over_limit_s": 0.0,
+    "overtaken": 1,
+    "overtakes": 0,
+    "score": 23,
+    "tailgate_s": 51.2
+   },
+   "Truck": {
+    "harsh_accels": 0,
+    "harsh_brakes": 0,
+    "oncoming_overtakes": 0,
+    "over_limit_s": 0.0,
+    "overtaken": 1,
+    "overtakes": 0,
+    "score": 100,
+    "tailgate_s": 0.0
+   },
+   "Van": {
+    "harsh_accels": 0,
+    "harsh_brakes": 0,
+    "oncoming_overtakes": 0,
+    "over_limit_s": 0.0,
+    "overtaken": 0,
+    "overtakes": 0,
+    "score": 100,
+    "tailgate_s": 0.0
+   }
+  },
+  "blocked_by": {
+   "CarA": 0,
+   "Jerky": 0,
+   "Moto": 0,
+   "Speeder": 0,
+   "Tailgater": 0,
+   "Truck": 0,
+   "Van": 0
+  },
+  "collisions": [],
+  "hazards": [],
+  "max_brake_ms2": {
+   "CarA": 0.6,
+   "Jerky": 6.0,
+   "Moto": 2.5,
+   "Speeder": 3.5,
+   "Tailgater": 1.6,
+   "Truck": -0.0,
+   "Van": 2.5
+  },
+  "min_speed_kmh": {
+   "CarA": 40.0,
+   "Jerky": 40.0,
+   "Moto": 40.1,
+   "Speeder": 39.9,
+   "Tailgater": 36.0,
+   "Truck": 40.0,
+   "Van": 40.1
+  },
+  "revoked": 0,
+  "yields": []
+ }
+}
