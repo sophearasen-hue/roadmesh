@@ -1,0 +1,27 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Flutter / Dart
+app/.dart_tool/
+app/build/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/.packages
+
+# Python (reference)
+__pycache__/
+*.pyc
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Never commit secrets or signing material
+*.pem
+*.p8
+*.p12
+*.jks
+*.keystore
+.env

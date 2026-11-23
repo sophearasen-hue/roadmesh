@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoadMesh — peer-to-peer road safety app</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --bg:#0a0e13; --panel:#111821; --panel2:#17212c; --line:#243241; --text:#e8eef5; --muted:#8a9bb0;
+  --blue:#3b82f6; --safe:#22c55e; --warn:#f59e0b; --risk:#ef4444; --road:#223040;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,"Kantumruy Pro",sans-serif}
+html[lang=km] body{font-family:"Kantumruy Pro",Inter,system-ui,sans-serif}
+button{font:inherit;color:inherit;cursor:pointer}
+.page{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:20px 12px 32px;gap:14px}
+.topbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;max-width:960px;width:100%}
+.topbar h1{font-size:17px;font-weight:600;margin:0 auto 0 0}
+.topbar h1 span{color:var(--muted);font-weight:400;font-size:13px;margin-left:8px}
+.seg{display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px}
+.seg button{border:0;background:transparent;padding:6px 12px;border-radius:7px;font-size:13px;color:var(--muted)}
+.seg button.on{background:var(--panel2);color:var(--text)}
+.caption{font-size:12.5px;color:var(--muted);max-width:720px;text-align:center;line-height:1.6}
+
+/* app frame */
+#app{background:var(--panel);border:10px solid #1c2530;overflow:hidden;display:flex;flex-direction:column;position:relative}
+#app.phone{width:390px;max-width:100%;height:800px;border-radius:40px}
+#app.carplay{width:960px;max-width:100%;height:480px;border-radius:20px}
+.ahead{display:flex;align-items:center;gap:8px;padding:12px 16px 10px;border-bottom:1px solid var(--line);flex:none}
+.logo{display:flex;align-items:center;gap:8px;font-weight:700;letter-spacing:.2px}
+.logo i{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#22c55e);display:inline-block;position:relative}
+.logo i:after{content:"";position:absolute;inset:8px;border:2px solid #fff;border-radius:50%}
+.logo small{display:block;font-weight:400;font-size:10.5px;color:var(--muted);letter-spacing:0}
+.ahead .sp{flex:1}
+.pill{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:5px 11px;font-size:12px}
+.pill.on{border-color:var(--blue);color:#bcd5ff}
+.content{flex:1;position:relative;min-height:0}
+.view{position:absolute;inset:0;display:none;overflow:auto}
+.view.on{display:block}
+#view-drive.on{display:block;overflow:hidden}
+.carplay #view-drive{display:grid!important;grid-template-columns:1fr 300px}
+.carplay .tabs{display:none}
+.carplay .hud{display:none}
+.mapwrap{position:relative;height:100%;width:100%;overflow:hidden}
+#map{width:100%;height:100%;display:block;background:#0c1219}
+.mtop{position:absolute;left:10px;right:10px;top:10px;display:flex;flex-direction:column;gap:6px;pointer-events:none}
+.mtop>*{pointer-events:auto}
+.maprow{display:flex;gap:6px;align-items:flex-start}
+.maprow button{background:rgba(17,24,33,.92);border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:12px;flex:none}
+.alert{border-radius:14px;padding:11px 14px;font-size:14px;font-weight:500;display:flex;gap:10px;align-items:center;background:rgba(20,32,44,.92);border:1px solid var(--line);line-height:1.45}
+.alert .dot{width:10px;height:10px;border-radius:50%;flex:none;background:var(--safe)}
+.alert.warn{background:rgba(120,72,8,.92);border-color:#b7791f}
+.alert.warn .dot{background:var(--warn)}
+.alert.danger{background:rgba(127,20,20,.94);border-color:#ef4444;animation:pulse 1s infinite}
+.alert.danger .dot{background:#fff}
+@keyframes pulse{50%{box-shadow:0 0 0 4px rgba(239,68,68,.35)}}
+.legend{flex:1;display:flex;flex-wrap:wrap;gap:2px 10px;background:rgba(17,24,33,.85);border:1px solid var(--line);border-radius:10px;padding:6px 9px;font-size:10.5px;color:var(--muted);line-height:1.5}
+.legend b{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:0}
+.hud{position:absolute;left:10px;right:10px;bottom:10px;background:rgba(17,24,33,.94);border:1px solid var(--line);border-radius:16px;padding:10px 12px;display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center}
+.speedo{display:flex;align-items:center;gap:10px}
+.speedo .v{font-size:38px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.speedo .u{font-size:11px;color:var(--muted)}
+.limit{width:42px;height:42px;border-radius:50%;border:4px solid #dc2626;background:#fff;color:#111;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;flex:none}
+.limit.over{animation:pulse 1s infinite}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;text-align:center}
+.stats div{background:var(--panel2);border-radius:10px;padding:6px 4px}
+.stats b{display:block;font-size:15px;font-variant-numeric:tabular-nums}
+.stats span{font-size:10.5px;color:var(--muted)}
+.ctrls{grid-column:1/-1;display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+.ctrls button{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:6px 12px;font-size:14px;font-weight:600}
+.ctrls .road{margin-left:auto;color:var(--text);font-size:12px;text-align:right}
+.ctrls button.brk{border-color:#7f1d1d;color:#fca5a5;font-size:12px}
+
+.side{display:none;border-left:1px solid var(--line);padding:12px;overflow:auto;flex-direction:column;gap:10px}
+.carplay .side{display:flex}
+.side .card{background:var(--panel2);border-radius:12px;padding:10px}
+.side .peerrow{display:flex;justify-content:space-between;font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line)}
+.side .peerrow:last-child{border:0}
+
+.tabs{flex:none;display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);background:var(--panel)}
+.tabs button{background:transparent;border:0;padding:9px 2px 12px;font-size:11.5px;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:4px}
+.tabs button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tabs button.on{color:#93c5fd}
+
+.pad{padding:14px 14px 20px}
+h2{font-size:16px;font-weight:600;margin:2px 0 10px}
+h3{font-size:13px;font-weight:600;margin:16px 0 8px;color:var(--muted)}
+.list{display:flex;flex-direction:column;gap:8px}
+.peer{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:10px 12px;display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;cursor:pointer;text-align:left;width:100%}
+.peer:hover{border-color:#36506b}
+.ico{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#0b1220}
+.peer .nm{font-size:13.5px;font-weight:600}
+.peer .sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+.peer .rt{text-align:right}
+.peer .rt b{font-size:16px;font-variant-numeric:tabular-nums}
+.badge{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:999px;font-weight:600;margin-top:3px}
+.b-safe{background:rgba(34,197,94,.15);color:#86efac}
+.b-caution{background:rgba(245,158,11,.15);color:#fcd34d}
+.b-risky{background:rgba(239,68,68,.18);color:#fca5a5}
+.empty{color:var(--muted);font-size:13px;padding:20px 4px;line-height:1.6}
+.kv{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kv div{background:var(--panel2);border-radius:12px;padding:9px 10px}
+.kv span{font-size:11px;color:var(--muted);display:block}
+.kv b{font-size:15px;font-variant-numeric:tabular-nums}
+.spark{width:100%;height:90px;background:var(--panel2);border-radius:12px;display:block}
+.ev{display:flex;gap:10px;font-size:12.5px;padding:8px 2px;border-bottom:1px solid var(--line);align-items:center}
+.ev .t{color:var(--muted);font-variant-numeric:tabular-nums;width:44px;flex:none}
+.ev .tag{font-size:10.5px;padding:2px 7px;border-radius:6px;flex:none;font-weight:600}
+.tag-speeding{background:rgba(239,68,68,.18);color:#fca5a5}
+.tag-hbrake{background:rgba(249,115,22,.18);color:#fdba74}
+.tag-hacc{background:rgba(245,158,11,.18);color:#fcd34d}
+.tag-overtake{background:rgba(139,92,246,.2);color:#c4b5fd}
+.backbtn{background:transparent;border:0;color:#93c5fd;padding:0 0 10px;font-size:13px}
+.scorecard{display:flex;gap:14px;align-items:center;background:var(--panel2);border-radius:14px;padding:12px}
+.scorecard .big{font-size:13px;color:var(--muted)}
+.scorecard .big b{display:block;font-size:22px;color:var(--text)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chips button{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:5px 11px;font-size:12px;color:var(--muted)}
+.chips button.on{border-color:var(--blue);color:var(--text)}
+.set{background:var(--panel2);border-radius:14px;padding:12px;margin-bottom:10px}
+.set label{display:block;font-size:13px;font-weight:600;margin-bottom:8px}
+.set .hint{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.55}
+.opt{display:flex;flex-direction:column;gap:6px}
+.opt button{text-align:left;border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:8px 10px;font-size:12.5px}
+.opt button.on{border-color:var(--blue);background:#13243a}
+.opt button small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+input[type=range]{width:100%;accent-color:var(--blue)}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12.5px}
+.toggle{width:40px;height:22px;border-radius:11px;background:#334155;border:0;position:relative;flex:none}
+.toggle:after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.2s}
+.toggle.on{background:var(--blue)}
+.toggle.on:after{left:21px}
+p.small{font-size:12px;color:var(--muted);line-height:1.6;margin:6px 0}
+@media (max-width:520px){ .page{padding:0} .topbar{padding:10px} #app.phone{border-radius:0;border-width:0;height:calc(100vh - 110px);width:100%} }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="topbar">
+    <h1>RoadMesh <span data-i18n="proto">Working prototype</span></h1>
+    <div class="seg" id="langSeg"><button data-lang="en">English</button><button data-lang="km">ខ្មែរ</button></div>
+    <div class="seg" id="viewSeg"><button data-view="phone" data-i18n="view_phone">Phone</button><button data-view="carplay">CarPlay</button></div>
+  </div>
+
+  <div id="app" class="phone">
+    <div class="ahead">
+      <div class="logo"><i></i><div>RoadMesh<small data-i18n="app_tag">Peer-to-peer road safety</small></div></div>
+      <div class="sp"></div>
+      <button class="pill" id="langPill">ខ្មែរ</button>
+      <button class="pill" id="pauseBtn" data-i18n="pause">Pause</button>
+    </div>
+
+    <div class="content">
+      <!-- DRIVE -->
+      <section class="view on" id="view-drive">
+        <div class="mapwrap">
+          <canvas id="map"></canvas>
+          <div class="mtop">
+            <div class="alert" id="alert"><span class="dot"></span><span id="alertTxt"></span></div>
+            <div class="maprow"><div class="legend" id="legend"></div><button id="demoBtn">Demo</button><button id="zoomBtn">Network view</button></div>
+          </div>
+          <div class="hud">
+            <div class="speedo">
+              <div class="limit" id="limitSign">60</div>
+              <div><div class="v" id="mySpeed">0</div><div class="u" data-i18n="kmh">km/h</div></div>
+            </div>
+            <div class="stats">
+              <div><b id="peersCount">0</b><span data-i18n="connected">Connected</span></div>
+              <div><b id="reachVal">0</b><span data-i18n="reach">Mesh reach</span></div>
+              <div><b id="scoreVal">100</b><span data-i18n="score">Score</span></div>
+            </div>
+            <div class="ctrls">
+              <span data-i18n="my_speed">My speed</span>
+              <button id="slowBtn">−</button><button id="fastBtn">+</button>
+              <button class="brk" id="brakeBtn" data-i18n="brake">Hard brake</button>
+              <span class="road" id="roadName"></span>
+            </div>
+          </div>
+        </div>
+        <aside class="side" id="side">
+          <div class="card" style="display:flex;align-items:center;gap:12px">
+            <div class="limit" id="cpLimit">60</div>
+            <div><div style="font-size:40px;font-weight:700;line-height:1" id="cpSpeed">0</div><div style="font-size:11px;color:var(--muted)" data-i18n="kmh">km/h</div></div>
+            <div style="margin-left:auto;text-align:right;font-size:12px;color:var(--muted)"><span data-i18n="score">Score</span><div style="font-size:20px;color:var(--text);font-weight:700" id="cpScore">100</div></div>
+          </div>
+          <div class="card" style="font-size:12.5px;color:var(--muted)"><div id="cpRoad"></div><div id="cpMesh" style="margin-top:4px"></div></div>
+          <div class="card"><div style="font-size:12px;color:var(--muted);margin-bottom:4px" data-i18n="nearest">Nearest vehicles</div><div id="cpPeers"></div></div>
+          <div class="ctrls" style="color:var(--muted)">
+            <button id="cpSlow">−</button><button id="cpFast">+</button><button class="brk" id="cpBrake" data-i18n="brake">Hard brake</button>
+          </div>
+        </aside>
+      </section>
+
+      <!-- PEERS -->
+      <section class="view" id="view-peers"><div class="pad" id="peersPane"></div></section>
+      <!-- BEHAVIOR -->
+      <section class="view" id="view-behavior"><div class="pad" id="behPane"></div></section>
+      <!-- SETTINGS -->
+      <section class="view" id="view-settings"><div class="pad" id="setPane"></div></section>
+    </div>
+
+    <nav class="tabs" id="tabs">
+      <button data-tab="drive" class="on"><svg viewBox="0 0 24 24"><path d="M12 3l7 18-7-4-7 4z"/></svg><span data-i18n="tab_drive">Drive</span></button>
+      <button data-tab="peers"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M7.8 7.8a6 6 0 000 8.4M16.2 7.8a6 6 0 010 8.4M4.9 4.9a10 10 0 000 14.2M19.1 4.9a10 10 0 010 14.2"/></svg><span data-i18n="tab_peers">Peers</span></button>
+      <button data-tab="behavior"><svg viewBox="0 0 24 24"><path d="M3 20h18M6 16l4-5 3 3 5-7"/></svg><span data-i18n="tab_behavior">Behavior</span></button>
+      <button data-tab="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg><span data-i18n="tab_settings">Settings</span></button>
+    </nav>
+  </div>
+  <div class="caption" data-i18n="caption">Every vehicle on the map is simulated in your browser. Each one runs the RoadMesh app: it broadcasts its position and speed over a short-range peer-to-peer radio, relays messages for others (multi-hop mesh), and scores the driving behavior it observes. Tap any vehicle to inspect it.</div>
+</div>
+
+<script>
+/* ===================== i18n ===================== */
+const T = {
+en:{
+ proto:"Working prototype", app_tag:"Peer-to-peer road safety", view_phone:"Phone", pause:"Pause", resume:"Resume",
+ network_view:"Network view", nearby_view:"Nearby view", kmh:"km/h", connected:"Connected", reach:"Mesh reach", score:"Score",
+ my_speed:"My speed", brake:"Hard brake", nearest:"Nearest vehicles",
+ tab_drive:"Drive", tab_peers:"Peers", tab_behavior:"Behavior", tab_settings:"Settings",
+ no_alert:"All clear — no hazards detected",
+ alert_cross:"{type} crossing from your {side} in {t} s",
+ side_left:"left", side_right:"right",
+ alert_brake:"Hard braking {d} m ahead",
+ alert_overtake:"{type} is overtaking you",
+ alert_behind:"Fast {type} approaching from behind ({v} km/h)",
+ alert_speed:"You are {o} km/h over the limit",
+ direct:"Direct", via_hops:"{n} hops", hop1:"1 hop",
+ type_car:"Car", type_moto:"Motorbike", type_truck:"Truck", type_tuk:"Tuk-tuk",
+ risk_safe:"Safe", risk_caution:"Caution", risk_risky:"Risky",
+ ev_speeding:"Speeding", ev_hacc:"Harsh acceleration", ev_hbrake:"Harsh braking", ev_overtake:"Overtake",
+ peers_title:"{n} vehicles in your mesh", peers_sub:"Seen directly by radio or relayed by other phones",
+ peers_empty:"No vehicles in range. Try a longer-range radio mode or more relay hops in Settings.",
+ dist:"Distance", speed:"Speed", road:"Road", link:"Link", latency:"Latency", accel:"Acceleration",
+ back:"‹ Back", speed_history:"Speed, last 2 minutes", events:"Recorded events", no_events:"No events recorded yet",
+ my_trip:"My trip", driving_score:"Driving score", distance:"Distance", avg_speed:"Average speed", max_speed:"Top speed",
+ timeline:"Event timeline", f_all:"All", f_me:"Me", f_peers:"Others", you:"You",
+ network_summary:"Drivers around you", risky_peers:"{r} risky · {c} caution · {s} safe",
+ language:"Language", radio_mode:"Peer-to-peer radio",
+ radio_ble:"Bluetooth LE", radio_ble_d:"Phone only · ~120 m per hop · 30 ms per hop",
+ radio_wifi:"Wi-Fi Aware / Direct", radio_wifi_d:"Phone only · ~300 m per hop · 10 ms per hop",
+ radio_lora:"Long-range radio add-on", radio_lora_d:"Small dongle · ~1 km per hop · 150 ms per hop",
+ max_hops:"Max relay hops: {n}", max_hops_d:"Each phone re-broadcasts messages it hears, so information travels further than one radio can reach.",
+ density:"Traffic density", d_low:"Low", d_med:"Medium", d_high:"High",
+ sim_speed:"Simulation speed", show_unconn:"Show vehicles outside the mesh (simulation only)",
+ privacy:"Privacy", privacy_txt:"Each phone broadcasts a random ID that changes every 5 minutes. No names, phone numbers or plate numbers are shared. Other drivers' behavior is scored on your phone only and never uploaded with an identity.",
+ about:"About this prototype", about_txt:"This is a working simulation of the RoadMesh app logic and screens. Vehicles, radio links and driving behavior are generated in your browser, so the logic and design can be tested before building the native iPhone, Android and CarPlay apps.",
+ legend_me:"You", legend_hop:"Mesh link", legend_unc:"Not in mesh",
+ caption:"Every vehicle on the map is simulated in your browser. Each one runs the RoadMesh app: it broadcasts its position and speed over a short-range peer-to-peer radio, relays messages for others (multi-hop mesh), and scores the driving behavior it observes. Tap any vehicle to inspect it.",
+ ago:"{s}s ago", m:"m", km:"km", s:"s", msg_rate:"10 messages/sec", hops_lbl:"hops",
+ mesh_line:"{n} vehicles · reach {d}", reached_by:"Reached via {n} relays",
+ overtook:"passed another vehicle", demo:"Hazard demo"
+},
+km:{
+ proto:"គំរូសាកល្បងដែលដំណើរការបាន", app_tag:"សុវត្ថិភាពចរាចរណ៍ពីយានមួយទៅយានមួយ", view_phone:"ទូរស័ព្ទ", pause:"ផ្អាក", resume:"បន្ត",
+ network_view:"មើលបណ្ដាញ", nearby_view:"មើលជិតខ្លួន", kmh:"គ.ម/ម៉ោង", connected:"បានភ្ជាប់", reach:"ចម្ងាយបណ្ដាញ", score:"ពិន្ទុ",
+ my_speed:"ល្បឿនខ្ញុំ", brake:"ហ្វ្រាំងខ្លាំង", nearest:"យាននៅជិតបំផុត",
+ tab_drive:"បើកបរ", tab_peers:"យានជុំវិញ", tab_behavior:"ឥរិយាបថ", tab_settings:"ការកំណត់",
+ no_alert:"ផ្លូវមានសុវត្ថិភាព — មិនមានគ្រោះថ្នាក់",
+ alert_cross:"{type}កំពុងឆ្លងកាត់ពីខាង{side}របស់អ្នក ក្នុងរយៈពេល {t} វិនាទី",
+ side_left:"ឆ្វេង", side_right:"ស្ដាំ",
+ alert_brake:"មានការហ្វ្រាំងខ្លាំង {d} ម៉ែត្រនៅខាងមុខ",
+ alert_overtake:"{type}កំពុងវ៉ាជែងអ្នក",
+ alert_behind:"{type}ល្បឿនលឿនកំពុងមកពីក្រោយ ({v} គ.ម/ម៉ោង)",
+ alert_speed:"អ្នកបើកលើសល្បឿនកំណត់ {o} គ.ម/ម៉ោង",
+ direct:"ភ្ជាប់ផ្ទាល់", via_hops:"បញ្ជូនបន្ត {n} ដង", hop1:"បញ្ជូនបន្ត ១ ដង",
+ type_car:"រថយន្ត", type_moto:"ម៉ូតូ", type_truck:"ឡានដឹកទំនិញ", type_tuk:"រ៉ឺម៉ក",
+ risk_safe:"សុវត្ថិភាព", risk_caution:"ប្រុងប្រយ័ត្ន", risk_risky:"គ្រោះថ្នាក់",
+ ev_speeding:"បើកលើសល្បឿន", ev_hacc:"បង្កើនល្បឿនខ្លាំង", ev_hbrake:"ហ្វ្រាំងខ្លាំង", ev_overtake:"វ៉ាជែង",
+ peers_title:"យានចំនួន {n} នៅក្នុងបណ្ដាញរបស់អ្នក", peers_sub:"ទទួលដោយផ្ទាល់តាមវិទ្យុ ឬបញ្ជូនបន្តដោយទូរស័ព្ទផ្សេងទៀត",
+ peers_empty:"គ្មានយាននៅក្នុងចម្ងាយ។ សូមជ្រើសរើសរបៀបវិទ្យុចម្ងាយឆ្ងាយជាង ឬបង្កើនចំនួនបញ្ជូនបន្តនៅក្នុងការកំណត់។",
+ dist:"ចម្ងាយ", speed:"ល្បឿន", road:"ផ្លូវ", link:"ការភ្ជាប់", latency:"ពេលពន្យារ", accel:"សំទុះ",
+ back:"‹ ត្រឡប់ក្រោយ", speed_history:"ល្បឿនក្នុងរយៈពេល ២ នាទីចុងក្រោយ", events:"ព្រឹត្តិការណ៍ដែលបានកត់ត្រា", no_events:"មិនទាន់មានព្រឹត្តិការណ៍",
+ my_trip:"ដំណើររបស់ខ្ញុំ", driving_score:"ពិន្ទុបើកបរ", distance:"ចម្ងាយ", avg_speed:"ល្បឿនមធ្យម", max_speed:"ល្បឿនខ្ពស់បំផុត",
+ timeline:"បញ្ជីព្រឹត្តិការណ៍", f_all:"ទាំងអស់", f_me:"ខ្ញុំ", f_peers:"យានផ្សេង", you:"អ្នក",
+ network_summary:"អ្នកបើកបរជុំវិញអ្នក", risky_peers:"គ្រោះថ្នាក់ {r} · ប្រុងប្រយ័ត្ន {c} · សុវត្ថិភាព {s}",
+ language:"ភាសា", radio_mode:"វិទ្យុពីយានមួយទៅយានមួយ",
+ radio_ble:"ប៊្លូធូស LE", radio_ble_d:"ទូរស័ព្ទតែប៉ុណ្ណោះ · ប្រហែល ១២០ ម៉ែត្រ ក្នុងមួយជំហាន · ៣០ មិល្លីវិនាទី",
+ radio_wifi:"Wi-Fi Aware / Direct", radio_wifi_d:"ទូរស័ព្ទតែប៉ុណ្ណោះ · ប្រហែល ៣០០ ម៉ែត្រ ក្នុងមួយជំហាន · ១០ មិល្លីវិនាទី",
+ radio_lora:"ឧបករណ៍វិទ្យុចម្ងាយឆ្ងាយបន្ថែម", radio_lora_d:"ឧបករណ៍តូច · ប្រហែល ១ គីឡូម៉ែត្រ ក្នុងមួយជំហាន · ១៥០ មិល្លីវិនាទី",
+ max_hops:"ចំនួនបញ្ជូនបន្តអតិបរមា៖ {n}", max_hops_d:"ទូរស័ព្ទនីមួយៗផ្សាយបន្តនូវសារដែលវាទទួលបាន ដូច្នេះព័ត៌មានអាចទៅដល់ឆ្ងាយជាងចម្ងាយវិទ្យុតែមួយ។",
+ density:"ដង់ស៊ីតេចរាចរណ៍", d_low:"តិច", d_med:"មធ្យម", d_high:"ច្រើន",
+ sim_speed:"ល្បឿនការក្លែងធ្វើ", show_unconn:"បង្ហាញយាននៅក្រៅបណ្ដាញ (សម្រាប់ការក្លែងធ្វើប៉ុណ្ណោះ)",
+ privacy:"ឯកជនភាព", privacy_txt:"ទូរស័ព្ទនីមួយៗផ្សាយលេខសម្គាល់ចៃដន្យ ដែលផ្លាស់ប្ដូររៀងរាល់ ៥ នាទីម្ដង។ មិនចែករំលែកឈ្មោះ លេខទូរស័ព្ទ ឬស្លាកលេខយានយន្តទេ។ ឥរិយាបថរបស់អ្នកបើកបរផ្សេងទៀតត្រូវបានវាយតម្លៃនៅលើទូរស័ព្ទរបស់អ្នកតែប៉ុណ្ណោះ ហើយមិនត្រូវបានផ្ញើចេញជាមួយអត្តសញ្ញាណឡើយ។",
+ about:"អំពីគំរូសាកល្បងនេះ", about_txt:"នេះជាការក្លែងធ្វើដែលដំណើរការបាន នៃតក្កវិជ្ជា និងអេក្រង់របស់កម្មវិធី RoadMesh។ យានយន្ត ការភ្ជាប់វិទ្យុ និងឥរិយាបថបើកបរ ត្រូវបានបង្កើតនៅក្នុងកម្មវិធីរុករករបស់អ្នក ដើម្បីសាកល្បងតក្កវិជ្ជា និងការរចនា មុនពេលបង្កើតកម្មវិធីពិតសម្រាប់ iPhone, Android និង CarPlay។",
+ legend_me:"អ្នក", legend_hop:"ការភ្ជាប់បណ្ដាញ", legend_unc:"មិននៅក្នុងបណ្ដាញ",
+ caption:"យានយន្តទាំងអស់នៅលើផែនទីត្រូវបានក្លែងធ្វើនៅក្នុងកម្មវិធីរុករករបស់អ្នក។ យាននីមួយៗប្រើកម្មវិធី RoadMesh៖ វាផ្សាយទីតាំង និងល្បឿនរបស់វាតាមវិទ្យុចម្ងាយខ្លី បញ្ជូនបន្តសារសម្រាប់យានផ្សេង (បណ្ដាញច្រើនជំហាន) ហើយវាយតម្លៃឥរិយាបថបើកបរដែលវាបានឃើញ។ ចុចលើយានណាមួយដើម្បីមើលព័ត៌មានលម្អិត។",
+ ago:"{s} វិនាទីមុន", m:"ម៉ែត្រ", km:"គ.ម", s:"វិ", msg_rate:"១០ សារ/វិនាទី", hops_lbl:"ជំហាន",
+ mesh_line:"យាន {n} · ចម្ងាយ {d}", reached_by:"ទទួលតាមរយៈការបញ្ជូនបន្ត {n} ដង",
+ overtook:"បានវ៉ាជែងយានផ្សេង", demo:"សាកល្បងគ្រោះថ្នាក់"
+}};
+let LANG="en";
+try{ const s=localStorage.getItem("rm_lang"); if(s==="km"||s==="en") LANG=s; }catch(e){}
+function t(k,v){ let s=(T[LANG][k]??T.en[k]??k); if(v) for(const x in v) s=s.split("{"+x+"}").join(v[x]); return s; }
+
+/* ===================== world ===================== */
+const W=2400,H=1600, DT=0.1, LANE_N=5, LANE_P=1.8;
+const ROADS=[
+ {id:0,axis:"h",c:200, limit:40,len:W,name:{en:"Street 271",km:"ផ្លូវលេខ ២៧១"}},
+ {id:1,axis:"h",c:800, limit:60,len:W,name:{en:"Russian Blvd",km:"មហាវិថីសហព័ន្ធរុស្ស៊ី"}},
+ {id:2,axis:"h",c:1400,limit:40,len:W,name:{en:"Street 598",km:"ផ្លូវលេខ ៥៩៨"}},
+ {id:3,axis:"v",c:300, limit:40,len:H,name:{en:"Street 51",km:"ផ្លូវលេខ ៥១"}},
+ {id:4,axis:"v",c:1200,limit:60,len:H,name:{en:"Monivong Blvd",km:"មហាវិថីព្រះមុនីវង្ស"}},
+ {id:5,axis:"v",c:2100,limit:40,len:H,name:{en:"Street 2004",km:"ផ្លូវលេខ ២០០៤"}},
+];
+const RADIO={ble:{r:120,lat:30},wifi:{r:300,lat:10},lora:{r:1000,lat:150}};
+const TYPES={car:{f:1,len:8,col:"car"},moto:{f:.95,len:5,col:"moto"},tuk:{f:.7,len:6.5,col:"tuk"},truck:{f:.8,len:10,col:"truck"}};
+const PROF={calm:{f:.85,acc:1.2,ot:.05,brk:.001},normal:{f:1,acc:2.0,ot:.35,brk:.003},aggr:{f:1.3,acc:4.2,ot:1.4,brk:.02}};
+
+const S={ radio:"wifi", maxHops:4, density:"med", simSpeed:2, showUnc:true, network:false, paused:false,
+  view:"phone", tab:"drive", filter:"all", selected:null, myBias:0 };
+try{ const v=localStorage.getItem("rm_view"); if(v==="phone"||v==="carplay") S.view=v; }catch(e){}
+
+let V=[], ME=null, simT=0, LOG=[], MESH=new Map(), REACH=0, nextId=1;
+const rnd=(a,b)=>a+Math.random()*(b-a), pick=a=>a[Math.floor(Math.random()*a.length)];
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+function pseud(){ return "RM-"+Math.floor(Math.random()*65536).toString(16).toUpperCase().padStart(4,"0"); }
+function wpick(o){ let r=Math.random(),acc=0; for(const k in o){acc+=o[k]; if(r<acc) return k;} return Object.keys(o)[0]; }
+
+function makeVehicle(me){
+  const r=me?ROADS[1]:pick(ROADS);
+  const v={ id:nextId++, me:!!me, pid:me?"RM-YOU":pseud(),
+    type: me?"car":wpick({moto:.55,car:.30,tuk:.08,truck:.07}),
+    prof: me?"normal":wpick({calm:.3,normal:.5,aggr:.2}),
+    road:r.id, dir:me?1:(Math.random()<.5?1:-1), s:me?700:rnd(40,r.len-40),
+    v:0, a:0, laneOff:LANE_N, overtaking:null, brakeT:0, bias:me?0:rnd(-1.5,1.5), biasT:rnd(5,15),
+    score:100, ev:{speeding:0,hacc:0,hbrake:0,overtake:0}, events:[], hist:[], histT:0,
+    spdT:0, spdF:false, haF:false, hbF:false, dist:0, sumV:0, nV:0, maxV:0, rotT:rnd(0,300) };
+  v.v=targetSpeed(v)*rnd(.6,1);
+  return v;
+}
+function targetSpeed(v){
+  const r=ROADS[v.road]; return Math.max(1, r.limit/3.6*PROF[v.prof].f*TYPES[v.type].f + v.bias + (v.me?S.myBias:0));
+}
+function initWorld(){
+  const n={low:40,med:75,high:120}[S.density];
+  V=[]; nextId=1; LOG=[]; simT=0; ME=makeVehicle(true); V.push(ME);
+  for(let i=0;i<n;i++) V.push(makeVehicle(false));
+  computeMesh();
+}
+function pos(v){ const r=ROADS[v.road]; const side=r.axis==="h"?v.dir:-v.dir; const off=side*v.laneOff;
+  return r.axis==="h"?{x:v.s,y:r.c+off}:{x:r.c+off,y:v.s}; }
+function heading(v){ const r=ROADS[v.road]; return r.axis==="h"?{x:v.dir,y:0}:{x:0,y:v.dir}; }
+const byId=id=>V.find(v=>v.id===id);
+
+function logEv(v,type,extra){
+  if(!v.me && !MESH.has(v.id)) return;           // only behavior we actually received is recorded
+  v.ev[type]++;
+  const pen={speeding:6,hbrake:5,hacc:3,overtake:1}[type];
+  v.score=Math.max(0,v.score-pen);
+  const e={t:simT,type,kmh:Math.round(v.v*3.6),road:v.road,vid:v.id,pid:v.pid,me:v.me,vtype:v.type,extra:extra||""};
+  v.events.unshift(e); if(v.events.length>30) v.events.pop();
+  LOG.unshift(e); if(LOG.length>120) LOG.pop();
+}
+function passingClear(v){
+  for(const o of V){ if(o===v||o.road!==v.road||o.dir!==v.dir) continue;
+    if(Math.abs(o.laneOff-LANE_P)<1.6 && Math.abs(o.s-v.s)<28) return false; }
+  return true;
+}
+
+function stepVehicle(v){
+  const r=ROADS[v.road], P=PROF[v.prof];
+  // random behavior changes (speed-up / slow-down moods)
+  v.biasT-=DT; if(v.biasT<=0 && !v.me){ v.bias = v.prof==="aggr"?rnd(-1,6):rnd(-2,2); v.biasT=rnd(8,20); }
+  if(!v.me && v.brakeT<=0 && Math.random()<P.brk*DT*10) v.brakeT=rnd(.8,1.5);
+  if(v.brakeAt && simT>=v.brakeAt){ v.brakeT=1.6; v.brakeAt=null; }
+  let desired=targetSpeed(v);
+  // leader in my lane
+  let leader=null,gap=1e9;
+  for(const o of V){ if(o===v||o.road!==v.road||o.dir!==v.dir) continue;
+    if(Math.abs(o.laneOff-v.laneOff)>2.2) continue;
+    const g=(o.s-v.s)*v.dir; if(g>0&&g<gap){gap=g;leader=o;} }
+  const safe=6+v.v*1.0;
+  if(v.overtaking){
+    const o=byId(v.overtaking); desired+=4;
+    if(!o||o.road!==v.road||o.dir!==v.dir){ v.overtaking=null; }
+    else if((v.s-o.s)*v.dir>10){ v.overtaking=null; logEv(v,"overtake"); }
+  } else if(leader && gap<safe*1.7 && leader.v<desired-1.5 && Math.random()<(v.me?0.25:P.ot)*DT && passingClear(v)){
+    v.overtaking=leader.id;
+  }
+  if(v.sync){ const dp=(ROADS[ME.road].c-v.s)*v.dir, dn2=(ROADS[v.road].c-ME.s)*ME.dir;
+    if(ME.road===v.sync.myRoad && dn2>0 && dp>12 && ME.v>1 && ALERT.lvl!=="danger") desired=clamp(dp/(dn2/ME.v),3,18); else if(dp<=12) v.sync=null; }
+  if(v.me && ALERT.lvl==="danger") desired=Math.min(desired, v.v*0.6);   // driver reacts to the warning
+  if(leader && gap<safe) desired=Math.min(desired, leader.v-(safe-gap)*0.45);
+  if(leader && gap<3) desired=0;
+  const oldV=v.v; let a;
+  if(v.brakeT>0){ v.brakeT-=DT; a=-6.5; }
+  else a=clamp((desired-v.v)/1.5,-7,P.acc);
+  v.v=Math.max(0,v.v+a*DT); v.a=(v.v-oldV)/DT;
+  const prevS=v.s; v.s+=v.v*v.dir*DT;
+  const tgt=v.overtaking?LANE_P:LANE_N; v.laneOff+=clamp(tgt-v.laneOff,-2.6*DT,2.6*DT);
+  v.dist+=v.v*DT;
+  // intersections: maybe turn
+  for(const cr of ROADS){ if(cr.axis===r.axis) continue; const p=cr.c;
+    if((prevS-p)*(v.s-p)<=0 && prevS!==v.s){
+      if(!v.overtaking && !(v.noTurn>simT) && Math.random()<(v.me?.22:.3)){ v.road=cr.id; v.s=r.c; v.dir=Math.random()<.5?1:-1; v.laneOff=LANE_N; }
+      break; } }
+  const rr=ROADS[v.road];
+  if(v.s<20){v.s=20;v.dir=1;v.overtaking=null;} if(v.s>rr.len-20){v.s=rr.len-20;v.dir=-1;v.overtaking=null;}
+  // behavior detection
+  const kmh=v.v*3.6, over=kmh-rr.limit;
+  if(over>10){ v.spdT+=DT; if(v.spdT>3&&!v.spdF){v.spdF=true; logEv(v,"speeding");} } else if(over<5){v.spdT=0;v.spdF=false;}
+  if(v.a>3.0&&!v.haF){v.haF=true;logEv(v,"hacc");} if(v.a<1.5) v.haF=false;
+  if(v.a<-4.5&&!v.hbF){v.hbF=true;logEv(v,"hbrake");} if(v.a>-2) v.hbF=false;
+  v.score=Math.min(100,v.score+DT*0.02);
+  v.histT+=DT; if(v.histT>=1){ v.histT=0; v.hist.push(Math.round(kmh)); if(v.hist.length>120) v.hist.shift(); }
+  if(v.me){ v.sumV+=kmh; v.nV++; v.maxV=Math.max(v.maxV,kmh); }
+  else { v.rotT-=DT; if(v.rotT<=0){ v.pid=pseud(); v.rotT=300; } }
+}
+
+function computeMesh(){
+  const R=RADIO[S.radio].r, R2=R*R; const P=V.map(pos);
+  MESH=new Map(); MESH.set(ME.id,{hop:0,parent:null}); let frontier=[0]; REACH=0;
+  const idx=new Map(V.map((v,i)=>[v.id,i]));
+  for(let h=1;h<=S.maxHops&&frontier.length;h++){
+    const nf=[];
+    for(const i of frontier){ for(let j=0;j<V.length;j++){ if(MESH.has(V[j].id)) continue;
+      const dx=P[i].x-P[j].x, dy=P[i].y-P[j].y; if(dx*dx+dy*dy<=R2){ MESH.set(V[j].id,{hop:h,parent:V[i].id}); nf.push(j);} } }
+    frontier=nf;
+  }
+  const mp=P[idx.get(ME.id)];
+  for(const [id] of MESH){ const p=P[idx.get(id)]; REACH=Math.max(REACH,Math.hypot(p.x-mp.x,p.y-mp.y)); }
+}
+
+
+/* hazard demo: press once = hidden motorbike crossing my next junction; press again = car ahead brakes hard */
+let demoStep=0;
+function spawnDemo(){
+  S.network=false; S.paused=false; if(ME.v<8) ME.v=13;
+  const r=ROADS[ME.road]; let next=null,dn=1e9;
+  for(const cr of ROADS){ if(cr.axis===r.axis) continue; const d=(cr.c-ME.s)*ME.dir; if(d>120&&d<dn){dn=d;next=cr;} }
+  if(demoStep===0 && next){
+    if(dn>180){ ME.s=next.c-ME.dir*160; dn=160; camInit=false; }
+    for(const o of V){ if(!o.me&&o.road===ME.road&&o.dir===ME.dir){ const g=(o.s-ME.s)*ME.dir; if(g>-40&&g<dn+40) o.s=ME.s-ME.dir*400; } }
+    const sp=11, dist=dn/ME.v*sp, dir=(r.c-dist>30)?1:-1;
+    const m=makeVehicle(false); m.type="moto"; m.prof="normal"; m.road=next.id; m.dir=dir; m.v=sp; m.bias=0;
+    m.s=clamp(r.c-dir*dist,25,next.len-25); m.noTurn=simT+40; m.sync={myRoad:ME.road}; V.push(m);
+    ME.noTurn=simT+dn/ME.v+4;
+  } else {
+    for(const o of V){ if(!o.me&&o.road===ME.road&&o.dir===ME.dir){ const g=(o.s-ME.s)*ME.dir; if(g>0&&g<160) o.s=ME.s-ME.dir*300; } }
+    const c=makeVehicle(false); c.type="car"; c.prof="normal"; c.road=ME.road; c.dir=ME.dir; c.s=ME.s+ME.dir*60; c.v=ME.v; c.laneOff=ME.laneOff;
+    c.brakeAt=simT+2.5; c.noTurn=simT+20; V.push(c); ME.noTurn=simT+10;
+  }
+  demoStep=1-demoStep; computeMesh(); setTab("drive"); applyStatic();
+}
+
+/* ===================== alerts ===================== */
+let ALERT={lvl:"ok",txt:"",target:null};
+function computeAlert(){
+  const r=ROADS[ME.road], mp=pos(ME), h=heading(ME);
+  const peers=V.filter(v=>!v.me&&MESH.has(v.id));
+  // 1. crossing conflict at my next intersection
+  let next=null,dn=1e9;
+  for(const cr of ROADS){ if(cr.axis===r.axis) continue; const d=(cr.c-ME.s)*ME.dir; if(d>0&&d<dn){dn=d;next=cr;} }
+  if(next && ME.v>2){
+    const t1=dn/ME.v;
+    for(const p of peers){ if(p.road!==next.id||p.v<2) continue; const dp=(r.c-p.s)*p.dir; if(dp<=0) continue;
+      const t2=dp/p.v; if(t1<7&&t2<7&&Math.abs(t1-t2)<2.2){
+        const pp=pos(p), cross=h.x*(pp.y-mp.y)-h.y*(pp.x-mp.x);
+        return ALERT={lvl:"danger",target:p.id,txt:t("alert_cross",{type:t("type_"+p.type),side:t(cross>0?"side_right":"side_left"),t:t1.toFixed(1)})}; } }
+  }
+  for(const p of peers){ if(p.road!==ME.road||p.dir!==ME.dir) continue; const g=(p.s-ME.s)*ME.dir;
+    if(g>0&&g<200&&p.a<-4) return ALERT={lvl:"danger",target:p.id,txt:t("alert_brake",{d:Math.round(g)})}; }
+  for(const p of peers){ if(p.overtaking===ME.id&&Math.abs(p.s-ME.s)<25)
+    return ALERT={lvl:"warn",target:p.id,txt:t("alert_overtake",{type:t("type_"+p.type)})}; }
+  for(const p of peers){ if(p.road!==ME.road||p.dir!==ME.dir) continue; const g=(p.s-ME.s)*ME.dir;
+    if(g<0&&g>-80&&Math.abs(p.laneOff-ME.laneOff)<2.2&&p.v-ME.v>5)
+      return ALERT={lvl:"warn",target:p.id,txt:t("alert_behind",{type:t("type_"+p.type),v:Math.round(p.v*3.6)})}; }
+  const over=ME.v*3.6-r.limit; if(over>5) return ALERT={lvl:"warn",target:null,txt:t("alert_speed",{o:Math.round(over)})};
+  return ALERT={lvl:"ok",target:null,txt:t("no_alert")};
+}
+
+/* ===================== helpers for UI ===================== */
+function risk(v){ return v.score>=85?"safe":v.score>=65?"caution":"risky"; }
+const RCOL={safe:"#22c55e",caution:"#f59e0b",risky:"#ef4444"};
+const TCOL={car:"#93c5fd",moto:"#fda4af",tuk:"#fcd34d",truck:"#c4b5fd"};
+const TLBL={car:"CAR",moto:"MOTO",tuk:"TUK",truck:"TRK"};
+function fmtDist(m){ return m>=1000?(m/1000).toFixed(1)+" "+t("km"):Math.round(m)+" "+t("m"); }
+function hopTxt(h){ return h<=1?t("direct"):(h===2?t("hop1"):t("via_hops",{n:h-1})); }
+function distTo(v){ const a=pos(ME),b=pos(v); return Math.hypot(a.x-b.x,a.y-b.y); }
+function roadName(id){ return ROADS[id].name[LANG]; }
+function esc(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+/* ===================== map rendering ===================== */
+const cv=document.getElementById("map"), ctx=cv.getContext("2d");
+let cam={x:0,y:0,sc:1}, camInit=false;
+function resize(){ const r=cv.getBoundingClientRect(), d=window.devicePixelRatio||1;
+  cv.width=Math.max(1,r.width*d); cv.height=Math.max(1,r.height*d); ctx.setTransform(d,0,0,d,0,0); }
+function w2s(x,y){ const r=cv.getBoundingClientRect(); return [(x-cam.x)*cam.sc+r.width/2,(y-cam.y)*cam.sc+r.height/2]; }
+const HOPCOL=["#60a5fa","#60a5fa","#a78bfa","#f472b6","#fb923c","#facc15","#34d399"];
+
+function drawArrow(x,y,hx,hy,len,fill,stroke){
+  const px=-hy, py=hx, w=len*0.62;
+  ctx.beginPath(); ctx.moveTo(x+hx*len,y+hy*len); ctx.lineTo(x-hx*len*.7+px*w,y-hy*len*.7+py*w);
+  ctx.lineTo(x-hx*len*.35,y-hy*len*.35); ctx.lineTo(x-hx*len*.7-px*w,y-hy*len*.7-py*w); ctx.closePath();
+  ctx.fillStyle=fill; ctx.fill(); if(stroke){ctx.lineWidth=1.5;ctx.strokeStyle=stroke;ctx.stroke();}
+}
+function draw(){
+  const rect=cv.getBoundingClientRect(); if(rect.width<2) return;
+  if(cv.width!==Math.round(rect.width*(window.devicePixelRatio||1))) resize();
+  const cw=rect.width, ch=rect.height, mp=pos(ME);
+  if(S.network){ const sc=Math.min(cw/W,ch/H)*0.94; cam.sc+=(sc-cam.sc)*.15; cam.x+=(W/2-cam.x)*.15; cam.y+=(H/2-cam.y)*.15; }
+  else { const sc=cw/520; if(!camInit){cam={x:mp.x,y:mp.y,sc};camInit=true;} cam.sc+=(sc-cam.sc)*.15; cam.x+=(mp.x-cam.x)*.2; cam.y+=(mp.y-cam.y)*.2; }
+  ctx.clearRect(0,0,cw,ch);
+  // block fill (city blocks)
+  ctx.fillStyle="#0d151e"; ctx.fillRect(0,0,cw,ch);
+  const [x0,y0]=w2s(0,0),[x1,y1]=w2s(W,H); ctx.fillStyle="#101923"; ctx.fillRect(x0,y0,x1-x0,y1-y0); ctx.strokeStyle="#1c2a38"; ctx.lineWidth=1; ctx.strokeRect(x0,y0,x1-x0,y1-y0);
+  // roads
+  for(const r of ROADS){
+    const wid=Math.max(4,(r.limit>=60?22:16)*cam.sc);
+    const [a1,b1]=r.axis==="h"?w2s(0,r.c):w2s(r.c,0), [a2,b2]=r.axis==="h"?w2s(W,r.c):w2s(r.c,H);
+    ctx.strokeStyle=r.limit>=60?"#2a3a4d":"#223040"; ctx.lineWidth=wid; ctx.lineCap="butt";
+    ctx.beginPath(); ctx.moveTo(a1,b1); ctx.lineTo(a2,b2); ctx.stroke();
+    ctx.strokeStyle="rgba(250,204,21,.35)"; ctx.lineWidth=1; ctx.setLineDash([6,8]);
+    ctx.beginPath(); ctx.moveTo(a1,b1); ctx.lineTo(a2,b2); ctx.stroke(); ctx.setLineDash([]);
+  }
+  // road labels
+  ctx.font="11px Inter, 'Kantumruy Pro', sans-serif"; ctx.fillStyle="rgba(148,163,184,.75)";
+  for(const r of ROADS){
+    if(r.axis==="h"){ const lx=S.network?60:clamp(mp.x-200,40,W-200); const [sx,sy]=w2s(lx,r.c-14*1); ctx.fillText(r.name[LANG],sx,sy-(S.network?6:10*cam.sc)); }
+    else { const ly=S.network?1000:clamp(mp.y-200,40,H-200); const [sx,sy]=w2s(r.c,ly); ctx.save(); ctx.translate(sx+(S.network?8:14*cam.sc),sy); ctx.rotate(Math.PI/2); ctx.fillText(r.name[LANG],0,0); ctx.restore(); }
+  }
+  // radio range
+  const R=RADIO[S.radio].r, [mx,my]=w2s(mp.x,mp.y);
+  ctx.beginPath(); ctx.arc(mx,my,R*cam.sc,0,Math.PI*2); ctx.fillStyle="rgba(59,130,246,.07)"; ctx.fill();
+  ctx.strokeStyle="rgba(59,130,246,.45)"; ctx.lineWidth=1; ctx.setLineDash([4,4]); ctx.stroke(); ctx.setLineDash([]);
+  // mesh links
+  const P=new Map(V.map(v=>[v.id,pos(v)]));
+  for(const [id,m] of MESH){ if(!m.parent) continue; const a=P.get(m.parent), b=P.get(id); if(!a||!b) continue;
+    const [ax,ay]=w2s(a.x,a.y),[bx,by]=w2s(b.x,b.y);
+    ctx.strokeStyle=HOPCOL[Math.min(m.hop,6)]; ctx.globalAlpha=.55; ctx.lineWidth=1.4;
+    ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke(); ctx.globalAlpha=1; }
+  // vehicles
+  const pulse=(Math.sin(performance.now()/180)+1)/2;
+  for(const v of V){ if(v.me) continue; const p=P.get(v.id), [sx,sy]=w2s(p.x,p.y);
+    if(sx<-20||sy<-20||sx>cw+20||sy>ch+20) continue;
+    const inMesh=MESH.has(v.id);
+    if(!inMesh){ if(S.showUnc){ ctx.beginPath(); ctx.arc(sx,sy,2.6,0,Math.PI*2); ctx.fillStyle="#3b4757"; ctx.fill(); } continue; }
+    const h=heading(v), L={moto:5.5,car:7.5,tuk:6.5,truck:9.5}[v.type]*(S.network?.8:1.35);
+    drawArrow(sx,sy,h.x,h.y,L,RCOL[risk(v)],"#0b1220");
+    if(ALERT.target===v.id){ ctx.beginPath(); ctx.arc(sx,sy,13+pulse*5,0,Math.PI*2); ctx.strokeStyle=ALERT.lvl==="danger"?"#ef4444":"#f59e0b"; ctx.lineWidth=2; ctx.stroke(); }
+    if(S.selected===v.id){ ctx.beginPath(); ctx.arc(sx,sy,12,0,Math.PI*2); ctx.strokeStyle="#fff"; ctx.lineWidth=1.5; ctx.stroke(); }
+    if(!S.network){ ctx.font="600 10px Inter, sans-serif"; ctx.fillStyle="rgba(226,232,240,.85)"; ctx.fillText(Math.round(v.v*3.6),sx+9,sy-8); }
+  }
+  // me
+  const h=heading(ME);
+  ctx.beginPath(); ctx.arc(mx,my,16,0,Math.PI*2); ctx.fillStyle="rgba(59,130,246,.22)"; ctx.fill();
+  drawArrow(mx,my,h.x,h.y,10,"#3b82f6","#fff");
+}
+cv.addEventListener("click",e=>{
+  const r=cv.getBoundingClientRect(), x=e.clientX-r.left, y=e.clientY-r.top; let best=null,bd=18;
+  for(const v of V){ if(v.me||!MESH.has(v.id)) continue; const p=pos(v), [sx,sy]=w2s(p.x,p.y), d=Math.hypot(sx-x,sy-y); if(d<bd){bd=d;best=v;} }
+  if(best){ S.selected=best.id; if(S.view==="phone") setTab("peers"); renderPeers(); }
+});
+
+/* ===================== DOM rendering ===================== */
+const $=id=>document.getElementById(id);
+function applyStatic(){
+  document.documentElement.lang=LANG;
+  document.querySelectorAll("[data-i18n]").forEach(el=>{ el.textContent=t(el.dataset.i18n); });
+  $("langPill").textContent=LANG==="en"?"ខ្មែរ":"EN";
+  $("pauseBtn").textContent=S.paused?t("resume"):t("pause");
+  $("zoomBtn").textContent=S.network?t("nearby_view"):t("network_view");
+  $("demoBtn").textContent=t("demo");
+  document.querySelectorAll("#langSeg button").forEach(b=>b.classList.toggle("on",b.dataset.lang===LANG));
+  document.querySelectorAll("#viewSeg button").forEach(b=>b.classList.toggle("on",b.dataset.view===S.view));
+  $("legend").innerHTML=`<div><b style="background:#3b82f6"></b>${t("legend_me")}</div>
+   <div><b style="background:#22c55e"></b>${t("risk_safe")}</div><div><b style="background:#f59e0b"></b>${t("risk_caution")}</div>
+   <div><b style="background:#ef4444"></b>${t("risk_risky")}</div>${S.showUnc?`<div><b style="background:#3b4757"></b>${t("legend_unc")}</div>`:""}`;
+  renderSettings(); renderPeers(); renderBehavior(); updateHud();
+}
+function setLang(l){ LANG=l; try{localStorage.setItem("rm_lang",l);}catch(e){} computeAlert(); applyStatic(); }
+function setView(v){ S.view=v; try{localStorage.setItem("rm_view",v);}catch(e){} $("app").className=v; if(v==="carplay") setTab("drive"); applyStatic(); setTimeout(resize,30); }
+function setTab(tab){ S.tab=tab; document.querySelectorAll(".view").forEach(el=>el.classList.toggle("on",el.id==="view-"+tab));
+  document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.tab===tab));
+  if(tab==="drive") setTimeout(resize,10); renderPeers(); renderBehavior(); }
+
+function updateHud(){
+  const r=ROADS[ME.road], kmh=Math.round(ME.v*3.6), over=kmh>r.limit+5;
+  $("mySpeed").textContent=kmh; $("limitSign").textContent=r.limit; $("limitSign").classList.toggle("over",over);
+  const n=MESH.size-1; $("peersCount").textContent=n; $("reachVal").textContent=fmtDist(REACH); $("scoreVal").textContent=Math.round(ME.score);
+  $("roadName").textContent=roadName(ME.road);
+  const al=$("alert"); al.className="alert"+(ALERT.lvl==="danger"?" danger":ALERT.lvl==="warn"?" warn":""); $("alertTxt").textContent=ALERT.txt;
+  // carplay side
+  $("cpSpeed").textContent=kmh; $("cpLimit").textContent=r.limit; $("cpLimit").classList.toggle("over",over); $("cpScore").textContent=Math.round(ME.score);
+  $("cpRoad").textContent=roadName(ME.road); $("cpMesh").textContent=t("mesh_line",{n,d:fmtDist(REACH)});
+  const near=V.filter(v=>!v.me&&MESH.has(v.id)).map(v=>[v,distTo(v)]).sort((a,b)=>a[1]-b[1]).slice(0,5);
+  $("cpPeers").innerHTML=near.map(([v,d])=>`<div class="peerrow"><span><b style="color:${RCOL[risk(v)]}">●</b> ${t("type_"+v.type)}</span><span>${Math.round(v.v*3.6)} ${t("kmh")} · ${fmtDist(d)}</span></div>`).join("")||`<div class="peerrow">—</div>`;
+}
+
+function peerCard(v){
+  const m=MESH.get(v.id), d=distTo(v), rk=risk(v);
+  return `<button class="peer" data-pid="${v.id}">
+    <div class="ico" style="background:${TCOL[v.type]}">${TLBL[v.type]}</div>
+    <div><div class="nm">${t("type_"+v.type)} <span style="color:var(--muted);font-weight:400;font-size:11px">${v.pid}</span></div>
+      <div class="sub">${fmtDist(d)} · ${hopTxt(m.hop)} · ${esc(roadName(v.road))}</div>
+      <span class="badge b-${rk}">${t("risk_"+rk)} · ${Math.round(v.score)}</span></div>
+    <div class="rt"><b>${Math.round(v.v*3.6)}</b><div class="sub">${t("kmh")}</div></div></button>`;
+}
+function renderPeers(){
+  if(S.tab!=="peers") return; const pane=$("peersPane");
+  if(S.selected){ const v=byId(S.selected); if(v&&MESH.has(v.id)) return renderDetail(v); }
+  const list=V.filter(v=>!v.me&&MESH.has(v.id)).sort((a,b)=>distTo(a)-distTo(b));
+  pane.innerHTML=`<h2>${t("peers_title",{n:list.length})}</h2><p class="small">${t("peers_sub")} · ${t("msg_rate")}</p>
+   <div class="list">${list.map(peerCard).join("")||`<div class="empty">${t("peers_empty")}</div>`}</div>`;
+}
+function evRow(e){
+  const who=e.me?t("you"):`${t("type_"+e.vtype)} ${e.pid}`;
+  return `<div class="ev"><span class="t">${t("ago",{s:Math.max(0,Math.round(simT-e.t))})}</span><span class="tag tag-${e.type}">${t("ev_"+e.type)}</span>
+   <span>${esc(who)} · ${e.kmh} ${t("kmh")} · ${esc(roadName(e.road))}</span></div>`;
+}
+function renderDetail(v){
+  const m=MESH.get(v.id), rk=risk(v), lat=RADIO[S.radio].lat*m.hop;
+  $("peersPane").innerHTML=`<button class="backbtn" id="backBtn">${t("back")}</button>
+   <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px"><div class="ico" style="background:${TCOL[v.type]};width:44px;height:44px">${TLBL[v.type]}</div>
+   <div><h2 style="margin:0">${t("type_"+v.type)} · ${v.pid}</h2><span class="badge b-${rk}">${t("risk_"+rk)} · ${t("score")} ${Math.round(v.score)}</span></div></div>
+   <div class="kv">
+    <div><span>${t("speed")}</span><b>${Math.round(v.v*3.6)} ${t("kmh")}</b></div>
+    <div><span>${t("accel")}</span><b>${v.a.toFixed(1)} m/s²</b></div>
+    <div><span>${t("dist")}</span><b>${fmtDist(distTo(v))}</b></div>
+    <div><span>${t("link")}</span><b>${hopTxt(m.hop)}</b></div>
+    <div><span>${t("road")}</span><b style="font-size:13px">${esc(roadName(v.road))}</b></div>
+    <div><span>${t("latency")}</span><b>${lat} ms</b></div>
+   </div>
+   <h3>${t("speed_history")}</h3><canvas class="spark" id="spark"></canvas>
+   <h3>${t("events")}</h3>
+   <div class="chips" style="margin-bottom:6px">${["speeding","hacc","hbrake","overtake"].map(k=>`<button>${t("ev_"+k)} · ${v.ev[k]}</button>`).join("")}</div>
+   ${v.events.map(evRow).join("")||`<div class="empty">${t("no_events")}</div>`}`;
+  drawSpark($("spark"),v.hist,ROADS[v.road].limit);
+}
+function drawSpark(c,arr,limit){
+  const r=c.getBoundingClientRect(), d=window.devicePixelRatio||1; c.width=r.width*d; c.height=r.height*d;
+  const g=c.getContext("2d"); g.setTransform(d,0,0,d,0,0); const w=r.width,h=r.height;
+  const mx=Math.max(limit+20,...arr,10);
+  const y=v=>h-8-(v/mx)*(h-18);
+  g.strokeStyle="rgba(239,68,68,.6)"; g.setLineDash([4,4]); g.beginPath(); g.moveTo(0,y(limit)); g.lineTo(w,y(limit)); g.stroke(); g.setLineDash([]);
+  g.fillStyle="rgba(239,68,68,.8)"; g.font="10px Inter, sans-serif"; g.fillText(limit+" "+t("kmh"),6,y(limit)-4);
+  if(arr.length<2) return;
+  g.strokeStyle="#60a5fa"; g.lineWidth=2; g.beginPath();
+  arr.forEach((v,i)=>{ const x=w-(arr.length-1-i)*(w/119); i?g.lineTo(x,y(v)):g.moveTo(x,y(v)); }); g.stroke();
+}
+function renderBehavior(){
+  if(S.tab!=="behavior") return;
+  const avg=ME.nV?ME.sumV/ME.nV:0, sc=Math.round(ME.score), rk=risk(ME), C=2*Math.PI*30;
+  const peers=V.filter(v=>!v.me&&MESH.has(v.id)); const cnt={safe:0,caution:0,risky:0}; peers.forEach(v=>cnt[risk(v)]++);
+  const ev=LOG.filter(e=>S.filter==="all"||(S.filter==="me"?e.me:!e.me)).slice(0,40);
+  $("behPane").innerHTML=`<h2>${t("my_trip")}</h2>
+   <div class="scorecard">
+     <svg width="76" height="76" viewBox="0 0 76 76"><circle cx="38" cy="38" r="30" fill="none" stroke="#243241" stroke-width="7"/>
+       <circle cx="38" cy="38" r="30" fill="none" stroke="${RCOL[rk]}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${C*sc/100} ${C}" transform="rotate(-90 38 38)"/>
+       <text x="38" y="44" text-anchor="middle" fill="#e8eef5" font-size="19" font-weight="700" font-family="Inter">${sc}</text></svg>
+     <div class="big">${t("driving_score")}<b>${t("risk_"+rk)}</b></div>
+   </div>
+   <div class="kv" style="margin-top:8px">
+     <div><span>${t("distance")}</span><b>${fmtDist(ME.dist)}</b></div>
+     <div><span>${t("avg_speed")}</span><b>${Math.round(avg)} ${t("kmh")}</b></div>
+     <div><span>${t("max_speed")}</span><b>${Math.round(ME.maxV)} ${t("kmh")}</b></div>
+     <div><span>${t("events")}</span><b>${ME.ev.speeding+ME.ev.hacc+ME.ev.hbrake+ME.ev.overtake}</b></div>
+   </div>
+   <div class="chips" style="margin-top:8px">${["speeding","hacc","hbrake","overtake"].map(k=>`<button>${t("ev_"+k)} · ${ME.ev[k]}</button>`).join("")}</div>
+   <h3>${t("speed_history")}</h3><canvas class="spark" id="mySpark"></canvas>
+   <h3>${t("network_summary")}</h3><p class="small">${t("risky_peers",{r:cnt.risky,c:cnt.caution,s:cnt.safe})}</p>
+   <h3>${t("timeline")}</h3>
+   <div class="chips" id="filt">${["all","me","peers"].map(f=>`<button data-f="${f}" class="${S.filter===f?"on":""}">${t("f_"+f)}</button>`).join("")}</div>
+   <div style="margin-top:6px">${ev.map(evRow).join("")||`<div class="empty">${t("no_events")}</div>`}</div>`;
+  drawSpark($("mySpark"),ME.hist,ROADS[ME.road].limit);
+}
+function renderSettings(){
+  const radio=k=>`<button data-radio="${k}" class="${S.radio===k?"on":""}">${t("radio_"+k)}<small>${t("radio_"+k+"_d")}</small></button>`;
+  $("setPane").innerHTML=`<h2>${t("tab_settings")}</h2>
+   <div class="set"><label>${t("language")}</label><div class="chips">
+     <button data-setlang="en" class="${LANG==="en"?"on":""}">English</button><button data-setlang="km" class="${LANG==="km"?"on":""}">ខ្មែរ</button></div></div>
+   <div class="set"><label>${t("radio_mode")}</label><div class="opt">${radio("ble")}${radio("wifi")}${radio("lora")}</div></div>
+   <div class="set"><label id="hopLbl">${t("max_hops",{n:S.maxHops})}</label>
+     <input type="range" min="1" max="6" value="${S.maxHops}" id="hopRange"><div class="hint">${t("max_hops_d")}</div></div>
+   <div class="set"><label>${t("density")}</label><div class="chips">${["low","med","high"].map(d=>`<button data-dens="${d}" class="${S.density===d?"on":""}">${t("d_"+d)}</button>`).join("")}</div></div>
+   <div class="set"><label>${t("sim_speed")}</label><div class="chips">${[1,2,4].map(x=>`<button data-sim="${x}" class="${S.simSpeed===x?"on":""}">${x}×</button>`).join("")}</div>
+     <div class="row" style="margin-top:12px"><span>${t("show_unconn")}</span><button class="toggle ${S.showUnc?"on":""}" id="uncTog" aria-label="toggle"></button></div></div>
+   <div class="set"><label>${t("privacy")}</label><p class="small">${t("privacy_txt")}</p></div>
+   <div class="set"><label>${t("about")}</label><p class="small">${t("about_txt")}</p></div>`;
+}
+
+/* ===================== events ===================== */
+document.addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  if(b.dataset.lang) setLang(b.dataset.lang);
+  else if(b.dataset.setlang) setLang(b.dataset.setlang);
+  else if(b.dataset.view) setView(b.dataset.view);
+  else if(b.dataset.tab){ if(b.dataset.tab==="peers") S.selected=null; setTab(b.dataset.tab); }
+  else if(b.dataset.pid){ S.selected=+b.dataset.pid; renderPeers(); }
+  else if(b.id==="backBtn"){ S.selected=null; renderPeers(); }
+  else if(b.dataset.radio){ S.radio=b.dataset.radio; computeMesh(); renderSettings(); }
+  else if(b.dataset.dens){ S.density=b.dataset.dens; initWorld(); camInit=false; renderSettings(); }
+  else if(b.dataset.sim){ S.simSpeed=+b.dataset.sim; renderSettings(); }
+  else if(b.dataset.f){ S.filter=b.dataset.f; renderBehavior(); }
+  else if(b.id==="uncTog"){ S.showUnc=!S.showUnc; applyStatic(); }
+  else if(b.id==="langPill") setLang(LANG==="en"?"km":"en");
+  else if(b.id==="pauseBtn"){ S.paused=!S.paused; b.textContent=S.paused?t("resume"):t("pause"); }
+  else if(b.id==="zoomBtn"){ S.network=!S.network; b.textContent=S.network?t("nearby_view"):t("network_view"); }
+  else if(b.id==="fastBtn"||b.id==="cpFast") S.myBias=Math.min(12,S.myBias+2);
+  else if(b.id==="slowBtn"||b.id==="cpSlow") S.myBias=Math.max(-10,S.myBias-2);
+  else if(b.id==="brakeBtn"||b.id==="cpBrake") ME.brakeT=1.2;
+  else if(b.id==="demoBtn") spawnDemo();
+});
+document.addEventListener("input",e=>{ if(e.target.id==="hopRange"){ S.maxHops=+e.target.value; $("hopLbl").textContent=t("max_hops",{n:S.maxHops}); computeMesh(); } });
+window.addEventListener("resize",resize);
+
+/* ===================== loop ===================== */
+let last=performance.now(), acc=0, meshT=0, uiT=0;
+function frame(now){
+  const dt=Math.min(.1,(now-last)/1000); last=now;
+  if(!S.paused){ acc+=dt*S.simSpeed;
+    while(acc>=DT){ acc-=DT; simT+=DT; for(const v of V) stepVehicle(v); meshT+=DT; if(meshT>=.5){meshT=0;computeMesh();} } }
+  uiT+=dt; if(uiT>.25){ uiT=0; computeAlert(); updateHud(); if(S.tab==="peers") renderPeers(); if(S.tab==="behavior"&&!document.querySelector("#behPane:hover")) renderBehavior(); }
+  if(S.tab==="drive"||S.view==="carplay") draw();
+  requestAnimationFrame(frame);
+}
+initWorld(); $("app").className=S.view; applyStatic(); resize(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>
