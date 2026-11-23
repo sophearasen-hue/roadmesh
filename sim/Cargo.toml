@@ -1,0 +1,14 @@
+[package]
+name = "roadmesh-sim"
+description = "Traffic simulator that drives roadmesh-core with GPS noise and packet loss (BUILD_PLAN Step 4)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+roadmesh-core = { path = "../core" }
+
+[lints]
+workspace = true

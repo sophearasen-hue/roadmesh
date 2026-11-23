@@ -1,0 +1,11 @@
+{
+  "@@locale": "en",
+  "appTitle": "RoadMesh",
+  "@appTitle": {
+    "description": "App name in the launcher and title bar. Brand name, not translated."
+  },
+  "tagline": "Peer-to-peer road safety",
+  "@tagline": {
+    "description": "One-line description under the app name."
+  }
+}
