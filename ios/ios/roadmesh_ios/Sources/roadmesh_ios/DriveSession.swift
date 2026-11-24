@@ -23,6 +23,7 @@ final class DriveSession: NSObject, CLLocationManagerDelegate {
     private var ticks = 0
     private var lastPseudonym = Data()
     private let fieldLog = FieldLog()
+    private var bridge: CellularBridge?
     private let vehicleType: UInt8
     private let devAnchor: String?
 
@@ -56,13 +57,15 @@ final class DriveSession: NSObject, CLLocationManagerDelegate {
 
     private func begin(at loc: CLLocation) {
         var anchors: [Data] = []
-        if let hex = devAnchor, let a = Crypto.unhex(hex), a.count == 34 { anchors.append(a) }
+        if let a = ServerConfig.caAnchor() { anchors.append(a) }
+        if let hex = devAnchor, let a = Crypto.unhex(hex), a.count == 34 { anchors.append(a) } // debug only
         guard let e = try? SafetyEngine(originLat: loc.coordinate.latitude, originLon: loc.coordinate.longitude,
                                         trustAnchors: anchors, keys: keys, relay: false) else { return }
         if let stored = enrolment.storedCertificates() { _ = try? e.addCertificates(batch: stored, now: now()) }
         engine = e
         radio = BleRadio { [weak self] frame, rssi in self?.received(frame, rssi: rssi) }
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.tick() }
+        startBridge(e)
     }
 
     private func now() -> Double { Date().timeIntervalSince1970 }
@@ -99,7 +102,9 @@ final class DriveSession: NSObject, CLLocationManagerDelegate {
         guard let e = engine, let r = radio else { return }
         let t = now()
         guard let f = fix(at: t) else { return }
-        if let frame = e.transmit(now: t, fix: f, road: road).first { r.broadcast(frame) }
+        let frames = e.transmit(now: t, fix: f, road: road)
+        if let frame = frames.first { r.broadcast(frame) }
+        frames.forEach { bridge?.upload($0) } // hazard events only
         let p = e.pseudonym(now: t)
         if p != lastPseudonym {
             if !lastPseudonym.isEmpty { r.renewAddress() }
@@ -109,6 +114,8 @@ final class DriveSession: NSObject, CLLocationManagerDelegate {
         let peers = e.peers(now: t, fix: f)
         ticks += 1
         if ticks % 10 == 0 {
+            bridge?.follow(lat: f.lat, lon: f.lon)
+            e.takeReports().forEach { bridge?.report($0) }
             fieldLog.everySecond(Dictionary(peers.map { (Crypto.hex($0.pseudonym), $0.distanceM) },
                                             uniquingKeysWith: { a, _ in a }))
             r.pruneLinks()
@@ -120,12 +127,45 @@ final class DriveSession: NSObject, CLLocationManagerDelegate {
         }
     }
 
+    /// The 4G link (docs/SERVER.md), if this build is configured for a server.
+    private func startBridge(_ e: SafetyEngine) {
+        guard let config = ServerConfig.fromBundle() else { return }
+        let keys = self.keys
+        let b = CellularBridge(config: config, identity: { keys.deviceIdentity() }) { [weak self] ev in
+            DispatchQueue.main.async { self?.onCellular(ev) }
+        }
+        bridge = b
+        b.start()
+        if e.validCertificates(now: now()) < 5 || keys.deviceIdentity() == nil {
+            let enrolment = self.enrolment
+            Task {
+                guard let batch = try? await enrolment.enrolOnline(config) else { return }
+                await MainActor.run { _ = try? self.engine?.addCertificates(batch: batch, now: self.now()) }
+            }
+        }
+    }
+
+    /// From the server: checked by the engine like any radio frame.
+    private func onCellular(_ ev: LinkEvent) {
+        guard let e = engine else { return }
+        switch ev {
+        case .hazardEvent(let frame):
+            let t = now()
+            if let f = fix(at: t) { _ = e.receive(frame: frame, now: t, fix: f) }
+        case .revocationList(let list):
+            _ = try? e.loadRevocationList(bytes: list)
+        default:
+            break
+        }
+    }
+
     private func received(_ frame: Data, rssi: Int) {
         guard let e = engine else { return }
         let t = now()
         guard let f = fix(at: t) else { return }
         if case let .accepted(pseudonym) = e.receive(frame: frame, now: t, fix: f) {
             fieldLog.onAccepted(pseudonymHex: Crypto.hex(pseudonym), rssi: rssi)
+            bridge?.upload(frame) // events heard by radio reach phones out of range
         }
     }
 
@@ -134,6 +174,8 @@ final class DriveSession: NSObject, CLLocationManagerDelegate {
         location.stopUpdatingLocation()
         radio?.stop()
         radio = nil
+        bridge?.stop()
+        bridge = nil
         engine = nil
     }
 
@@ -150,6 +192,7 @@ final class DriveSession: NSObject, CLLocationManagerDelegate {
     func deleteMyData() {
         engine?.deleteMyData()
         fieldLog.clear()
+        bridge?.deleteMyData()
     }
 
     func createCertificateRequest() throws -> String { try enrolment.createRequest().path }

@@ -52,4 +52,24 @@ final class RoadMeshKitTests: XCTestCase {
         log.clear()
         XCTAssertEqual(log.csv().split(separator: "\n").count, 1)
     }
+
+    func testPinningMatchesOnlyPinnedKeys() {
+        let a = Data([0x04] + [UInt8](repeating: 1, count: 64))
+        let b = Data([0x04] + [UInt8](repeating: 2, count: 64))
+        let pins = [Pinning.sha256(Pinning.spki(p256Point: a)!), Data(repeating: 9, count: 32)]
+        XCTAssertTrue(Pinning.matches(p256Point: a, pins: pins))
+        XCTAssertFalse(Pinning.matches(p256Point: b, pins: pins))
+        XCTAssertFalse(Pinning.matches(p256Point: Data([1, 2, 3]), pins: pins))
+        // the SPKI is the standard 91-byte DER structure
+        XCTAssertEqual(Pinning.spki(p256Point: a)?.count, 91)
+    }
+
+    func testPinListNeedsABackupPin() {
+        let one = Data(repeating: 1, count: 32).base64EncodedString()
+        let two = Data(repeating: 2, count: 32).base64EncodedString()
+        XCTAssertNil(Pinning.parse(one))
+        XCTAssertEqual(Pinning.parse("\(one), \(two)")?.count, 2)
+        XCTAssertNil(Pinning.parse("\(one),not-base64"))
+        XCTAssertNil(Pinning.parse(""))
+    }
 }

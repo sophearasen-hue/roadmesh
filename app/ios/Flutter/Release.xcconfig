@@ -1,1 +1,4 @@
 #include "Generated.xcconfig"
+// The edge server and production CA anchor (docs/SERVER.md): Flutter/Server.xcconfig with
+// ROADMESH_SERVER_HOST, ROADMESH_SERVER_PINS (current,backup) and ROADMESH_CA_ANCHOR.
+#include? "Server.xcconfig"

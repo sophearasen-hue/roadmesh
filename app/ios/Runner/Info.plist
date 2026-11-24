@@ -20,6 +20,13 @@
 		<string>location</string>
 	</array>
 	<!-- Debug builds only: the developer CA's trust anchor (Flutter/DevCa.xcconfig, never committed) -->
+	<!-- The edge server and production CA anchor (Flutter/Server.xcconfig; docs/SERVER.md) -->
+	<key>RoadMeshServerHost</key>
+	<string>$(ROADMESH_SERVER_HOST)</string>
+	<key>RoadMeshServerPins</key>
+	<string>$(ROADMESH_SERVER_PINS)</string>
+	<key>RoadMeshCaAnchor</key>
+	<string>$(ROADMESH_CA_ANCHOR)</string>
 	<key>RoadMeshDevCaAnchor</key>
 	<string>$(ROADMESH_DEV_CA_ANCHOR)</string>
 	<key>CFBundleDisplayName</key>

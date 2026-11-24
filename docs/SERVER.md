@@ -67,6 +67,21 @@ At start-up the server logs the pseudonym CA trust anchor (base64). Build that a
 
 `roadmesh-server pins server.pem` prints the SPKI pin of each certificate in a PEM file, for the app configuration. Always ship the current pin and a backup pin (a key held offline for rotation).
 
+## App configuration
+
+| | Android (Gradle properties, e.g. `-P` or `~/.gradle/gradle.properties`) | iOS (`app/ios/Flutter/Server.xcconfig`, git-ignored) |
+|---|---|---|
+| Server host | `roadmesh.serverHost` | `ROADMESH_SERVER_HOST` |
+| Pins (current,backup) | `roadmesh.serverPins` | `ROADMESH_SERVER_PINS` |
+| Pseudonym CA anchor (68 hex) | `roadmesh.caAnchor` | `ROADMESH_CA_ANCHOR` |
+| Play Integrity project number | `roadmesh.cloudProject` | – |
+
+- **Missing values.** Without a host and at least two pins, the cellular bridge stays off and the phone works by radio alone.
+- **Server key type.** The server's TLS key must be EC P-256; the iOS pin check computes P-256 SPKIs.
+- **iOS release builds.** They need the App Attest entitlement `com.apple.developer.devicecheck.appattest-environment = production` (Step 14 store set-up). Without it, iOS uses the development environment, which the server accepts only with `RM_APPLE_DEVELOPMENT=1`.
+- **What phones send.** Phones upload only hazard events: their own and those they heard by radio. They subscribe to the 9 cells around them, never sending their position as such.
+- **What phones do with downloads.** Events and the revocation list from the server go through the same checks as radio frames.
+
 ## AWS set-up (Singapore, ap-southeast-1)
 
 **KMS (AUDIT S-19).**
