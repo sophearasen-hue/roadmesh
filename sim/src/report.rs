@@ -351,9 +351,9 @@ pub fn build(seeds: u64, duration_s: f64, threads: usize) -> String {
         r,
         "80 vehicles, 20 % loss, mixed GPS, {seeds} runs each, relaying off and on with the \
          SPEC §5 rules (TTL 2/5, back-off, direction filter, 1.5 km cut-off, congestion \
-         control). In a city most conflicts are within direct radio range, so relaying \
-         mainly costs airtime here; its benefit is on long roads (`roadmesh-sim \
-         highway_relay --spec`).\n"
+         control). Relays carry messages around buildings and past lost packets, at the \
+         cost of extra airtime; on long roads they also announce queues far ahead \
+         (`roadmesh-sim highway_relay --spec`).\n"
     );
     let per = |a: u64, b: u64| if b == 0 { 0.0 } else { a as f64 / b as f64 };
     let _ = writeln!(r, "| | Relay off | Relay on |");
