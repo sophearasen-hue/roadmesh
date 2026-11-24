@@ -91,6 +91,10 @@ class RoadmeshAndroidPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ev
                 "createCertificateRequest" -> result.success(svc?.createCertificateRequest())
                 "importCertificates" -> result.success(svc?.importCertificates())
                 "exportFieldLog" -> result.success(svc?.exportFieldLog())
+                "alertTone" -> {
+                    alertTone(call.argument<String>("level") == "danger")
+                    result.success(null)
+                }
                 "deleteMyData" -> {
                     svc?.deleteMyData()
                     result.success(null)
@@ -99,6 +103,22 @@ class RoadmeshAndroidPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ev
             }
         } catch (e: Exception) {
             result.error("roadmesh", e.javaClass.simpleName, null) // no payloads or keys in errors
+        }
+    }
+
+    /** The engine chose the alert; this only sounds it (notification stream, follows the ringer). */
+    private fun alertTone(danger: Boolean) {
+        runCatching {
+            val tone = android.media.ToneGenerator(android.media.AudioManager.STREAM_NOTIFICATION, 100)
+            tone.startTone(
+                if (danger) android.media.ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD else android.media.ToneGenerator.TONE_PROP_BEEP,
+                if (danger) 600 else 200,
+            )
+            main.postDelayed({ tone.release() }, 800)
+        }
+        runCatching {
+            val v = context.getSystemService(android.os.Vibrator::class.java)
+            v?.vibrate(android.os.VibrationEffect.createOneShot(if (danger) 500L else 150L, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
         }
     }
 

@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'l10n/app_localizations.dart';
 import 'radio.dart';
+import 'ui/carplay.dart';
 import 'ui/controller.dart';
 import 'ui/demo.dart';
 import 'ui/home.dart';
@@ -37,13 +38,18 @@ class RoadMeshApp extends StatefulWidget {
 class _RoadMeshAppState extends State<RoadMeshApp> {
   bool _driving = false;
   DemoTraffic? _demo;
+  CarPlayLink? _carplay;
 
   DriveController get c => widget.controller;
 
   @override
   void initState() {
     super.initState();
-    if (widget.live) c.attach(RoadMeshRadio.updates);
+    if (widget.live) {
+      c.attach(RoadMeshRadio.updates);
+      c.onAlertTone = RoadMeshRadio.alertTone;
+      _carplay = CarPlayLink(onMute: c.setMuted);
+    }
   }
 
   Future<void> _toggleDrive(BuildContext context) async {
@@ -86,13 +92,21 @@ class _RoadMeshAppState extends State<RoadMeshApp> {
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: Builder(
-        builder: (context) => HomeScreen(
-          c: c,
-          driving: _driving,
-          onDrive: widget.live && _demo == null
-              ? () => _toggleDrive(context)
-              : null,
-        ),
+        builder: (context) {
+          final u = c.last;
+          if (_carplay != null && u != null) {
+            _carplay!.show(
+              carPlayModel(AppLocalizations.of(context), u, muted: c.muted),
+            );
+          }
+          return HomeScreen(
+            c: c,
+            driving: _driving,
+            onDrive: widget.live && _demo == null
+                ? () => _toggleDrive(context)
+                : null,
+          );
+        },
       ),
     ),
   );

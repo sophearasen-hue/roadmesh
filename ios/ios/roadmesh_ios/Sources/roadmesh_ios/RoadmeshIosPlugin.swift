@@ -1,3 +1,4 @@
+import AudioToolbox
 import Flutter
 import Foundation
 import RoadMeshKit
@@ -14,6 +15,15 @@ public class RoadmeshIosPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         registrar.addMethodCallDelegate(instance, channel: methods)
         FlutterEventChannel(name: "roadmesh/radio/events", binaryMessenger: registrar.messenger())
             .setStreamHandler(instance)
+        // CarPlay content from Flutter; the mute button answers on the same channel
+        let carplay = FlutterMethodChannel(name: "roadmesh/carplay", binaryMessenger: registrar.messenger())
+        CarPlayHub.shared.channel = carplay
+        carplay.setMethodCallHandler { call, result in
+            if call.method == "update", let m = call.arguments as? [String: Any], let c = CarPlayContent(m) {
+                CarPlayHub.shared.set(c)
+            }
+            result(nil)
+        }
     }
 
     private var devAnchor: String? {
@@ -55,6 +65,11 @@ public class RoadmeshIosPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
                 result(try DriveSession.current?.importCertificates())
             case "exportFieldLog":
                 result(try DriveSession.current?.exportFieldLog())
+            case "alertTone":
+                // the engine chose the alert; this only sounds it (system sounds follow the ringer)
+                AudioServicesPlaySystemSound((args?["level"] as? String) == "danger" ? 1005 : 1057)
+                AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+                result(nil)
             case "deleteMyData":
                 DriveSession.current?.deleteMyData()
                 result(nil)

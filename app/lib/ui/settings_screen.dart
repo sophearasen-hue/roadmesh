@@ -110,6 +110,23 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
           ]),
+        section(l.alertSound, [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  l.alertSoundD,
+                  style: const TextStyle(fontSize: 12.5),
+                ),
+              ),
+              Switch(
+                key: const Key('sound'),
+                value: !c.muted,
+                onChanged: (on) => c.setMuted(!on),
+              ),
+            ],
+          ),
+        ]),
         section(l.motoMode, [
           Row(
             children: [

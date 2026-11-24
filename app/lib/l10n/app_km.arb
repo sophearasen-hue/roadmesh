@@ -236,5 +236,41 @@
   "dLow": "តិច",
   "dMed": "មធ្យម",
   "dHigh": "ច្រើន",
-  "showUnconn": "បង្ហាញយាននៅក្រៅបណ្ដាញ (សម្រាប់ការក្លែងធ្វើប៉ុណ្ណោះ)"
+  "showUnconn": "បង្ហាញយាននៅក្រៅបណ្ដាញ (សម្រាប់ការក្លែងធ្វើប៉ុណ្ណោះ)",
+  "carplaySpeed": "{speed} គ.ម/ម៉ោង · ល្បឿនកំណត់ {limit}",
+  "@carplaySpeed": {
+    "x-needs-review": true
+  },
+  "carplaySpeedNoLimit": "{speed} គ.ម/ម៉ោង",
+  "@carplaySpeedNoLimit": {
+    "x-needs-review": true
+  },
+  "carplayMute": "បិទសំឡេង",
+  "@carplayMute": {
+    "x-needs-review": true
+  },
+  "carplayUnmute": "បើកសំឡេង",
+  "@carplayUnmute": {
+    "x-needs-review": true
+  },
+  "carplayMuted": "បានបិទសំឡេងការព្រមាន",
+  "@carplayMuted": {
+    "x-needs-review": true
+  },
+  "carplayNoVehicles": "គ្មានយាននៅជិត",
+  "@carplayNoVehicles": {
+    "x-needs-review": true
+  },
+  "carplayRow": "{speed} គ.ម/ម៉ោង · {distance}",
+  "@carplayRow": {
+    "x-needs-review": true
+  },
+  "alertSound": "សំឡេងការព្រមាន",
+  "@alertSound": {
+    "x-needs-review": true
+  },
+  "alertSoundD": "សំឡេងសម្រាប់ការព្រមាន និងសំឡេងរោទ៍សម្រាប់គ្រោះថ្នាក់។ អាចបិទសំឡេងពី CarPlay ផងដែរ។",
+  "@alertSoundD": {
+    "x-needs-review": true
+  }
 }
