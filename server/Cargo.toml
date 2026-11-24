@@ -21,7 +21,7 @@ roadmesh-core = { path = "../core" }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros", "signal"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
-rustls-pki-types = "1"
+rustls-pki-types = { version = "1", features = ["std"] }
 # Device certificates (X.509 for mutual TLS), signed through the CA key interface.
 rcgen = { version = "0.14", default-features = false, features = ["pem"] }
 x509-parser = { version = "0.18", features = ["verify"] }
