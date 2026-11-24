@@ -19,7 +19,7 @@ BUILD_PLAN Step 6. Same role as `android/`: the drive session runs the Rust safe
 | `RoadmeshIosPlugin.swift` | Flutter channels `roadmesh/radio`, `roadmesh/radio/events` |
 | `PrivacyInfo.xcprivacy` | Privacy manifest (precise location for app functionality, not linked, no tracking) |
 | `RoadMeshCore.swift`, `Frameworks/` (generated) | UniFFI bindings and the Rust core as an XCFramework |
-| `../RoadMeshKit/` | Pure Swift helpers with unit tests (`swift test`) |
+| `ios/roadmesh_ios/Sources/RoadMeshKit/` | Pure Swift helpers (signature conversion, field log); unit-tested from `RoadMeshKit/` with `swift test` |
 
 The plugin builds with **Swift Package Manager** (`flutter config --enable-swift-package-manager`).
 

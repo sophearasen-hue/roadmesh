@@ -1,6 +1,7 @@
 // swift-tools-version: 5.9
-// Pure Swift helpers of the RoadMesh iOS radio (no Flutter, no hardware), unit-tested with
-// `swift test`. The plugin in ../ios/roadmesh_ios depends on this package.
+// Unit tests for the pure Swift helpers of the RoadMesh iOS radio (no Flutter, no hardware):
+// `swift test`. Sources/RoadMeshKit is a link to ../ios/roadmesh_ios/Sources/RoadMeshKit,
+// where the plugin builds them as its own target.
 import PackageDescription
 
 let package = Package(
