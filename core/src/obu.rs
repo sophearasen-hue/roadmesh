@@ -8,14 +8,17 @@
 //! the display and voice. Only the simulator's test driver follows that number.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::auth::{AuthError, Signer, Verifier};
 use crate::behavior::{BehaviorMonitor, Observation, SpeedLimits, Subject};
 use crate::config::Config;
 use crate::geo::{GeoOrigin, math_to_compass_deg};
-use crate::ldm::{Check, Ldm, Misbehaviour, PeerMsg};
+use crate::ldm::{Check, Entry, Ldm, Misbehaviour, PeerMsg};
+use crate::map::RoadMap;
 use crate::prediction::{Motion, Pose, first_conflict, trajectory};
 use crate::rsm::{self, DecodeError, EventCode, Frame, MsgType, Rsm, TempId, VehicleType, flags};
+use crate::tracker::{OwnFilter, Tracker};
 
 /// This phone's own vehicle, from its sensors.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -164,6 +167,9 @@ pub struct Decision {
     /// Advised acceleration limit (m/s², ≤ 0): 0 = do not accelerate, negative = brake
     /// this hard. `None` = no advice. Information only; the simulator's test driver uses it.
     pub advised_accel: Option<f64>,
+    /// Every vehicle the advised braking accounts for (the app can ring them all on the map;
+    /// only the most important alert is shown).
+    pub avoiding: Vec<TempId>,
 }
 
 /// Result of receiving one frame.
@@ -209,6 +215,8 @@ struct Threat {
     traj: Vec<Pose>,
     /// Outline inflation for this pair (safety margin + position uncertainty).
     margin: f64,
+    /// Same-direction vehicle whose lane cannot be resolved from GPS (Step 4).
+    lane_ambiguous: bool,
 }
 
 /// Hysteresis state of the SPEC §8 alerts.
@@ -237,6 +245,12 @@ pub struct Obu {
     evidence: HashMap<TempId, Vec<Frame>>,
     /// Heartbeats seen per peer, for verification sampling (off by default).
     sample_count: HashMap<TempId, u32>,
+    /// Static road map (SPEC §6 layer 1), if the platform supplied one.
+    map: Option<Arc<RoadMap>>,
+    /// Smoothed peer tracks (SPEC §6).
+    tracker: Tracker,
+    /// Smoothed own position.
+    own_filter: OwnFilter,
     outbox: Vec<Frame>,
     msg_id: u16,
     state: DriveState,
@@ -312,6 +326,9 @@ impl Obu {
             last_frame: HashMap::new(),
             evidence: HashMap::new(),
             sample_count: HashMap::new(),
+            map: None,
+            tracker: Tracker::new(),
+            own_filter: OwnFilter::default(),
             outbox: Vec::new(),
             msg_id: 0,
             state: DriveState::Cruise,
@@ -340,6 +357,32 @@ impl Obu {
     /// Senders this phone has blocked.
     pub fn blocked(&self) -> &HashSet<TempId> {
         &self.blocked
+    }
+
+    /// Use this road map for map matching, speed limits and the off-road check.
+    pub fn set_map(&mut self, map: Arc<RoadMap>) {
+        self.map = Some(map);
+    }
+
+    /// The road map, if any.
+    pub fn map(&self) -> Option<&RoadMap> {
+        self.map.as_deref()
+    }
+
+    /// Smoothed tracks.
+    pub fn tracker(&self) -> &Tracker {
+        &self.tracker
+    }
+
+    /// SPEC §10: a sender far outside every road (but inside the map's coverage) is misbehaving.
+    fn off_road(&self, msg: &PeerMsg) -> Check {
+        if let (Some(map), Some(max)) = (&self.map, self.cfg.off_road_max_m) {
+            let d = map.distance_off_road(msg.motion.x, msg.motion.y);
+            if d > max.max(3.0 * msg.pos_accuracy_m) && d < self.cfg.map_coverage_m {
+                return Check::Misbehaviour(Misbehaviour::OffRoad(d));
+            }
+        }
+        Check::Ok
     }
 
     /// Block a sender locally, e.g. one whose certificate the server revoked.
@@ -536,7 +579,11 @@ impl Obu {
             return RxOutcome::Own;
         }
         let msg = PeerMsg::from_rsm(&r, &self.origin, now);
-        match self.ldm.check(&msg, now, &self.cfg) {
+        let check = match self.ldm.check(&msg, now, &self.cfg) {
+            Check::Ok => self.off_road(&msg),
+            other => other,
+        };
+        match check {
             Check::Duplicate | Check::Stale => return RxOutcome::Dropped,
             Check::Misbehaviour(reason) => {
                 // protect this phone at once, before any CA decision
@@ -560,6 +607,10 @@ impl Obu {
         }
         self.ldm.update(msg, now, r.hop_count);
         self.last_frame.insert(r.temp_id, frame.clone());
+        if self.cfg.tracking {
+            self.tracker
+                .update(r.temp_id, &msg.motion, msg.pos_accuracy_m, msg.t, &self.cfg);
+        }
         // Store-and-forward once per message. Only verified, plausible, new messages are relayed.
         if self.relay && r.ttl > 0 {
             let (hx, hy) = match frame.last_hop {
@@ -590,6 +641,10 @@ impl Obu {
     // ------------------------------------------------------------ right of way
 
     fn must_yield(&self, me: &Motion, other: &Motion) -> bool {
+        // a stopped or crawling vehicle in my path cannot get out of the way (Step 4)
+        if self.cfg.obstacle_speed.is_some_and(|v| other.speed < v) {
+            return true;
+        }
         match relation(me, other) {
             Relation::Ahead => true, // never hit the vehicle in front
             Relation::Behind => false,
@@ -712,12 +767,17 @@ impl Obu {
 
     // ------------------------------------------------------------ hazard ahead
 
-    fn find_hazard(&self, me: &Motion, own_len: f64) -> Option<(f64, PeerMsg, u8)> {
+    fn find_hazard(
+        cfg: &Config,
+        view: &[Entry],
+        me: &Motion,
+        own_len: f64,
+    ) -> Option<(f64, PeerMsg, u8)> {
         let (s, c) = me.heading.sin_cos();
         let mut best: Option<(f64, PeerMsg, u8)> = None;
-        for e in self.ldm.entries() {
+        for e in view {
             let m = &e.msg;
-            if m.motion.speed > self.cfg.hazard_stopped_speed
+            if m.motion.speed > cfg.hazard_stopped_speed
                 || relation(me, &m.motion) != Relation::Ahead
             {
                 continue;
@@ -728,7 +788,7 @@ impl Obu {
             let gap = along - (own_len + m.length) / 2.0;
             if lateral.abs() < 3.0
                 && gap > 0.0
-                && gap < self.cfg.hazard_range_m
+                && gap < cfg.hazard_range_m
                 && best.as_ref().is_none_or(|b| gap < b.0)
             {
                 best = Some((gap, *m, e.hops));
@@ -755,6 +815,54 @@ impl Obu {
         cap
     }
 
+    // ------------------------------------------------------------ tracking view (SPEC §6)
+
+    /// Own state with the smoothed and lane-snapped position.
+    fn own_view(&mut self, own: &OwnState, now: f64) -> OwnState {
+        let mut m = own.motion;
+        if self.cfg.tracking {
+            m = self
+                .own_filter
+                .smooth(&own.motion, own.pos_accuracy_m, now, &self.cfg);
+        }
+        if self.cfg.map_matching
+            && let Some(map) = &self.map
+        {
+            let fl = if self.own_overtaking {
+                flags::OVERTAKING
+            } else {
+                0
+            };
+            m = map.snap(&m, own.pos_accuracy_m, fl, &self.cfg).0;
+        }
+        OwnState { motion: m, ..*own }
+    }
+
+    /// LDM entries with smoothed, lane-snapped positions, and each track's map
+    /// confidence: what the safety logic sees, and what the app's map should draw.
+    pub fn peer_view(&self) -> (Vec<Entry>, HashMap<TempId, f64>) {
+        let mut conf = HashMap::new();
+        let mut out = Vec::new();
+        for e in self.ldm.entries() {
+            let mut e = *e;
+            if self.cfg.tracking
+                && let Some(tr) = self.tracker.get(&e.msg.temp_id)
+                && (tr.t - e.msg.t).abs() < 1e-6
+            {
+                e.msg.motion = tr.motion();
+            }
+            if self.cfg.map_matching
+                && let Some(map) = &self.map
+            {
+                let (m, mm) = map.snap(&e.msg.motion, e.msg.pos_accuracy_m, e.msg.flags, &self.cfg);
+                e.msg.motion = m;
+                conf.insert(e.msg.temp_id, mm.map_or(0.0, |x| x.confidence));
+            }
+            out.push(e);
+        }
+        (out, conf)
+    }
+
     // ------------------------------------------------------------ decide
 
     /// Run all safety applications for this cycle (`dt` = time since the last cycle).
@@ -772,6 +880,11 @@ impl Obu {
         let ldm = &self.ldm;
         self.last_frame.retain(|id, _| ldm.get(id).is_some());
         self.sample_count.retain(|id, _| ldm.get(id).is_some());
+        self.tracker.retain(|id| ldm.get(id).is_some());
+        // SPEC §6: smoothed, map-matched positions for everything below
+        let own_view = self.own_view(own, now);
+        let own = &own_view;
+        let (view, confidence) = self.peer_view();
         let me = own.motion;
         let dims = own.dims();
         let ego_const = trajectory(Motion { accel: 0.0, ..me }, c.horizon_s, c.pred_step_s, 0.0);
@@ -782,12 +895,15 @@ impl Obu {
         // SPEC §6 confidence gate: imprecise tracks never raise Warning/Danger.
         let mut fresh: Vec<PeerMsg> = Vec::new();
         let mut low_conf: Vec<PeerMsg> = Vec::new();
-        for e in self.ldm.entries() {
+        for e in &view {
             let m = &e.msg;
             if now_ms - m.t_ms <= fresh_ms
                 && (m.motion.x - me.x).hypot(m.motion.y - me.y) <= c.safety_range_m
             {
-                if m.pos_accuracy_m > c.max_alert_pos_accuracy_m {
+                let unsure = confidence
+                    .get(&m.temp_id)
+                    .is_some_and(|&conf| conf < c.map_min_confidence);
+                if m.pos_accuracy_m > c.max_alert_pos_accuracy_m || unsure {
                     low_conf.push(*m);
                 } else {
                     fresh.push(*m);
@@ -800,21 +916,44 @@ impl Obu {
         for m in &fresh {
             let tr = trajectory(m.motion, c.horizon_s, c.pred_step_s, (now - m.t).max(0.0));
             let margin = self.margin_for(own, m);
+            // same direction with lanes unresolvable from GPS: add the lateral error
+            let sigma_lat = own.pos_accuracy_m.hypot(m.pos_accuracy_m);
+            let lane_ambiguous = c.lane_resolve_sigma_m.is_some_and(|lim| sigma_lat > lim)
+                && (m.motion.heading - me.heading).cos() > 0.7;
+            let widen = if lane_ambiguous {
+                sigma_lat.min(2.0 * 3.4) / 2.0
+            } else {
+                0.0
+            };
+            let (ol, ow) = self.own_dims(own);
+            let (pl, pw) = self.peer_dims(m);
+            // already "overlapping" now and not closing: uncertainty margins, not a collision course
+            let (rx, ry) = (m.motion.x - me.x, m.motion.y - me.y);
+            let dist = rx.hypot(ry).max(0.1);
+            let (vx, vy) = (
+                m.motion.speed * m.motion.heading.cos() - me.speed * me.heading.cos(),
+                m.motion.speed * m.motion.heading.sin() - me.speed * me.heading.sin(),
+            );
+            let closing = -(rx * vx + ry * vy) / dist;
             if let Some(ttc) = first_conflict(
                 &ego_const,
-                self.own_dims(own),
+                (ol, ow + widen),
                 &tr,
-                self.peer_dims(m),
+                (pl, pw + widen),
                 margin,
                 0.0,
                 c.pred_step_s,
             ) && ttc < c.ttc_warn_s
+                && !(c.ignore_static_overlap
+                    && ttc <= c.pred_step_s + 1e-9
+                    && closing < c.static_overlap_closing)
             {
                 threats.push(Threat {
                     ttc,
                     msg: *m,
                     traj: tr.clone(),
                     margin,
+                    lane_ambiguous,
                 });
             }
             if m.motion.accel <= -c.hard_brake_ahead_decel
@@ -830,7 +969,7 @@ impl Obu {
         threats.sort_by(|a, b| a.ttc.total_cmp(&b.ttc)); // stable, like Python's sort
         let worst_ttc = threats.first().map(|t| t.ttc);
 
-        let mut hazard = self.find_hazard(&me, dims.0);
+        let mut hazard = Self::find_hazard(&c, &view, &me, dims.0);
         if let Some(h) = hazard {
             self.hazard_mem = Some((now, h.1, h.2));
         } else if let Some((seen, m, hops)) = self.hazard_mem
@@ -879,8 +1018,12 @@ impl Obu {
             }
         }
 
+        // an unresolved-lane vehicle ahead becomes a Danger (give way) only when close
         let yield_idx: Vec<usize> = (0..threats.len())
-            .filter(|&i| self.must_yield(&me, &threats[i].msg.motion))
+            .filter(|&i| {
+                self.must_yield(&me, &threats[i].msg.motion)
+                    && !(threats[i].lane_ambiguous && threats[i].ttc >= c.ttc_brake_s)
+            })
             .collect();
         let mut avoid: Vec<&Threat> = yield_idx.iter().map(|&i| &threats[i]).collect();
         for (i, th) in threats.iter().enumerate() {
@@ -900,10 +1043,12 @@ impl Obu {
                 msg: m,
                 traj: tr,
                 margin: self.margin_for(own, &m),
+                lane_ambiguous: false,
             };
             avoid.push(&held_target);
         }
 
+        let avoiding: Vec<TempId> = avoid.iter().map(|t| t.msg.temp_id).collect();
         let mut cap: Option<f64> = None;
         if lost_target {
             cap = Some(c.failsafe_brake); // fail safe: slow down, don't drive on blind
@@ -941,9 +1086,7 @@ impl Obu {
             length: dims.0,
             vehicle_type: own.vehicle_type,
         };
-        let peers: Vec<Observation> = self
-            .ldm
-            .entries()
+        let peers: Vec<Observation> = view
             .iter()
             .map(|e| Observation {
                 who: Subject::Peer(e.msg.temp_id),
@@ -1006,6 +1149,7 @@ impl Obu {
             yield_to: self.yield_to,
             worst_ttc,
             advised_accel: cap,
+            avoiding,
         }
     }
 
@@ -1016,6 +1160,7 @@ impl Obu {
             msg: *m,
             traj: traj.to_vec(),
             margin: self.margin_for(own, m),
+            lane_ambiguous: false,
         };
         self.gentlest_safe_accel(own, &[&th])
     }
@@ -1092,6 +1237,23 @@ impl Obu {
         }
 
         // 1. crossing conflict (Danger for the vehicle that must give way, Caution for priority)
+        let ego = trajectory(Motion { accel: 0.0, ..me }, c.horizon_s, c.pred_step_s, 0.0);
+        let own_dims = self.own_dims(x.own);
+        // the collision prediction confirms the paths meet (or miss by under yield_pet_s)
+        let confirmed = |m: &PeerMsg| {
+            traj_of(&m.temp_id).is_some_and(|tr| {
+                first_conflict(
+                    &ego,
+                    own_dims,
+                    tr,
+                    self.peer_dims(m),
+                    self.margin_for(x.own, m),
+                    c.yield_pet_s,
+                    c.pred_step_s,
+                )
+                .is_some()
+            })
+        };
         let mut still = HashSet::new();
         for m in x.fresh {
             if relation(&me, &m.motion) != Relation::Crossing {
@@ -1136,9 +1298,14 @@ impl Obu {
                 if let Some(a) = adv {
                     push_extra(a);
                 }
+                let level = if !c.danger_needs_confirmation || yielding_to_it || confirmed(m) {
+                    Level::Danger
+                } else {
+                    Level::Warning
+                };
                 let mut a = self.alert(
                     AlertKind::CrossingConflict,
-                    Level::Danger,
+                    level,
                     Some((m, hops_of(&id))),
                     &me,
                     adv,
@@ -1208,9 +1375,18 @@ impl Obu {
                     .unwrap_or(0.0)
                     .min(0.0);
                 push_extra(adv);
+                // inside my stopping distance, or on a predicted collision course: Danger
+                let v = me.speed;
+                let stopping = v * c.stopping_reaction_s + v * v / (2.0 * c.advice_firm_max);
+                let close = along <= stopping || x.threats.iter().any(|t| t.msg.temp_id == id);
+                let level = if !c.danger_needs_confirmation || close {
+                    Level::Danger
+                } else {
+                    Level::Warning
+                };
                 out.push(self.alert(
                     AlertKind::HardBrakingAhead,
-                    Level::Danger,
+                    level,
                     Some((m, hops_of(&id))),
                     &me,
                     Some(adv),
@@ -1226,7 +1402,9 @@ impl Obu {
                     if let Some(id) = self.yield_to
                         && let Some(m) = x.fresh.iter().find(|m| m.temp_id == id)
                     {
+                        let obstacle = c.obstacle_speed.is_some_and(|v| m.motion.speed < v);
                         let kind = match relation(&me, &m.motion) {
+                            _ if obstacle => Some(AlertKind::VehicleAhead), // stopped in my path
                             Relation::Ahead => Some(AlertKind::VehicleAhead),
                             Relation::Oncoming => Some(AlertKind::Oncoming),
                             _ => None, // crossing: already covered by rule 1
@@ -1249,8 +1427,14 @@ impl Obu {
                     }
                 }
                 DriveState::Brake => {
+                    // SPEC §8: the vehicle that must give way is on a collision course
+                    // within 2 s and is not slowing
+                    let not_slowing = |th: &Threat| match c.not_yielding_max_decel {
+                        Some(d) => th.msg.motion.accel > -d,
+                        None => relation(&me, &th.msg.motion) != Relation::Crossing,
+                    };
                     if let Some(th) = x.threats.first()
-                        && relation(&me, &th.msg.motion) != Relation::Crossing
+                        && not_slowing(th)
                     {
                         let mut a = self.alert(
                             AlertKind::NotYielding,
@@ -1265,6 +1449,31 @@ impl Obu {
                 }
                 _ => {}
             }
+        }
+
+        // 2c. vehicle ahead whose lane GPS cannot resolve: Warning with braking advice
+        //     (Danger only once it is closer than ttc_brake_s, through rule 2b)
+        for th in x.threats {
+            if !th.lane_ambiguous
+                || th.ttc < c.ttc_brake_s
+                || relation(&me, &th.msg.motion) != Relation::Ahead
+                || out
+                    .iter()
+                    .any(|a| a.target == Some(th.msg.temp_id) && a.level == Level::Danger)
+            {
+                continue;
+            }
+            let adv = self.advice_against(x.own, &th.msg, &th.traj).min(0.0);
+            push_extra(adv);
+            let mut a = self.alert(
+                AlertKind::VehicleAhead,
+                Level::Warning,
+                Some((&th.msg, hops_of(&th.msg.temp_id))),
+                &me,
+                Some(adv),
+            );
+            a.ttc_s = Some(th.ttc);
+            out.push(a);
         }
 
         // 3. stopped traffic ahead (possibly far away, via relays)
@@ -1519,7 +1728,7 @@ impl Obu {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::f64::consts::FRAC_PI_2;
+    use std::f64::consts::{FRAC_PI_2, PI};
 
     /// Logic tests only: accepts everything. The crypto is tested in `pki` and in
     /// the simulator's end-to-end tests with real certificates.
@@ -1825,6 +2034,55 @@ mod tests {
         o.decide(t, 0.1, me, road, &crate::behavior::NoLimits)
     }
 
+    fn two_way_road() -> Arc<RoadMap> {
+        Arc::new(RoadMap::new(
+            vec![crate::map::Road {
+                id: 1,
+                points: vec![(-1000.0, 0.0), (1000.0, 0.0)],
+                lanes: 2,
+                lane_width_m: 3.4,
+                limit: 60.0 / 3.6,
+                one_way: false,
+            }],
+            18.0,
+        ))
+    }
+
+    /// SPEC §6 map matching: GPS noise that pulls two oncoming vehicles into each
+    /// other's lanes does not raise a false head-on Danger.
+    #[test]
+    fn spec_lane_snapping_separates_oncoming_traffic_under_gps_noise() {
+        let mut o = spec();
+        o.set_map(two_way_road());
+        let mut no_map = spec();
+        // eastbound in the outer lane (y = -5.1) but GPS says y = +0.5;
+        // westbound in its outer lane (y = +5.1) but GPS says y = -0.5
+        let me = OwnState {
+            pos_accuracy_m: 6.0,
+            ..own(-40.0, 0.5, 0.0, 15.0)
+        };
+        let them = peer(b"WEST", 1, 0.0, 40.0, -0.5, PI, 15.0, 0.0, 0, 6.0);
+        let d = step(
+            &mut o,
+            0.0,
+            &me,
+            &RoadContext::default(),
+            std::slice::from_ref(&them),
+        );
+        assert!(
+            d.alerts.iter().all(|a| a.kind != AlertKind::Oncoming),
+            "{:?}",
+            kinds(&d)
+        );
+        // without the map the same noise looks like a head-on collision
+        let d2 = step(&mut no_map, 0.0, &me, &RoadContext::default(), &[them]);
+        assert!(
+            d2.alerts.iter().any(|a| a.kind == AlertKind::Oncoming),
+            "{:?}",
+            kinds(&d2)
+        );
+    }
+
     /// AUDIT P-29, P-34: crossing conflict, Danger only for the vehicle that must give way
     #[test]
     fn spec_crossing_danger_only_for_the_vehicle_that_must_yield() {
@@ -1852,6 +2110,37 @@ mod tests {
     }
 
     /// AUDIT P-30: hard braking ahead, and its 1 s exit hold (P-35)
+    /// User decision (Step 4): beyond my stopping distance, hard braking ahead is a Warning
+    #[test]
+    fn spec_far_hard_braking_is_a_warning_near_is_danger() {
+        let me = own(0.0, 0.0, 0.0, 20.0); // stopping distance 20 + 400/9 = 64 m
+        let road = RoadContext::default();
+        let far = step(
+            &mut spec(),
+            0.0,
+            &me,
+            &road,
+            &[peer(b"lead", 1, 0.0, 150.0, 0.0, 0.0, 20.0, -6.0, 0, 1.0)],
+        );
+        assert!(
+            kinds(&far).contains(&(AlertKind::HardBrakingAhead, Level::Warning)),
+            "{:?}",
+            kinds(&far)
+        );
+        let near = step(
+            &mut spec(),
+            0.0,
+            &me,
+            &road,
+            &[peer(b"lead", 1, 0.0, 60.0, 0.0, 0.0, 20.0, -6.0, 0, 1.0)],
+        );
+        assert!(
+            kinds(&near).contains(&(AlertKind::HardBrakingAhead, Level::Danger)),
+            "{:?}",
+            kinds(&near)
+        );
+    }
+
     #[test]
     fn spec_hard_braking_ahead_enters_and_holds_for_1_s() {
         let mut o = spec();
@@ -1862,7 +2151,7 @@ mod tests {
             0.0,
             &me,
             &road,
-            &[peer(b"lead", 1, 0.0, 120.0, 0.0, 0.0, 20.0, -6.0, 0, 1.0)],
+            &[peer(b"lead", 1, 0.0, 60.0, 0.0, 0.0, 20.0, -6.0, 0, 1.0)],
         );
         assert!(kinds(&d).contains(&(AlertKind::HardBrakingAhead, Level::Danger)));
         // braking stops (decel 1.0 < 1.5): stays for 1 s, then clears
@@ -1878,7 +2167,7 @@ mod tests {
                     b"lead",
                     1 + i,
                     t,
-                    120.0 + 20.0 * t,
+                    60.0 + 20.0 * t,
                     0.0,
                     0.0,
                     20.0,

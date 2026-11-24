@@ -774,6 +774,8 @@ pub enum ReportReason {
     RateTooHigh = 4,
     /// Impossible position jump.
     PositionJump = 5,
+    /// Claimed position far from any road.
+    OffRoad = 6,
 }
 
 impl ReportReason {
@@ -785,14 +787,16 @@ impl ReportReason {
             3 => Self::FutureTimestamp,
             4 => Self::RateTooHigh,
             5 => Self::PositionJump,
+            6 => Self::OffRoad,
             _ => return None,
         })
     }
 
     /// Can the server confirm this reason from the signed evidence alone?
-    /// (A future timestamp depends on when the reporter received the message.)
+    /// (A future timestamp depends on when the reporter received the message;
+    /// off-road needs the map, which the server checks once it has one, Step 9.)
     pub fn checkable_from_evidence(self) -> bool {
-        self != Self::FutureTimestamp
+        !matches!(self, Self::FutureTimestamp | Self::OffRoad)
     }
 }
 
@@ -804,6 +808,7 @@ impl From<Misbehaviour> for ReportReason {
             Misbehaviour::FutureTimestamp => Self::FutureTimestamp,
             Misbehaviour::RateTooHigh => Self::RateTooHigh,
             Misbehaviour::PositionJump(_) => Self::PositionJump,
+            Misbehaviour::OffRoad(_) => Self::OffRoad,
         }
     }
 }

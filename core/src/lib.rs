@@ -14,10 +14,12 @@ pub mod config;
 pub mod geo;
 pub mod geometry;
 pub mod ldm;
+pub mod map;
 pub mod obu;
 pub mod pki;
 pub mod prediction;
 pub mod rsm;
+pub mod tracker;
 
 /// Version of the core, reported to the app and in test reports.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

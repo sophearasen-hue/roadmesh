@@ -80,10 +80,80 @@ pub struct Config {
     pub jump_speed_factor: f64,
     /// See `jump_speed_factor` (m/s).
     pub jump_speed_slack: f64,
+    /// SPEC §10 rule instead: a jump is misbehaviour only beyond max(speeds) × time + this (m).
+    /// `None` = the reference's speed rule above. The reference rule blocked honest phones
+    /// with ordinary GPS jitter in the Step 4 simulation.
+    pub jump_slack_m: Option<f64>,
+    /// ... or this × the sender's reported accuracy if larger (user decision, Step 4: phones
+    /// at ~10 m accuracy jump more than 15 m between fixes). 0 = fixed slack.
+    pub jump_slack_accuracy_factor: f64,
+    /// ... with the reported accuracy counted up to this (m), so a sender cannot buy an
+    /// unlimited allowance by claiming poor accuracy.
+    pub jump_slack_accuracy_cap_m: f64,
     /// Tracks with worse reported position accuracy never raise Warning/Danger (m). SPEC §6.
     pub max_alert_pos_accuracy_m: f64,
     /// Low-confidence tracks may still raise a Caution "possible conflict" (user decision, Step 2).
     pub low_confidence_caution: bool,
+
+    // ---------------------------------------------------------------- tracking and map matching (SPEC §6, Step 4)
+    /// Smooth each track's GPS position with a Kalman filter driven by the reported motion.
+    pub tracking: bool,
+    /// Position process noise of the filter (m² per s).
+    pub track_process_noise_m2_s: f64,
+    /// Error of the reported speed used to predict the track (m/s).
+    pub track_speed_noise: f64,
+    /// A fix further than this many standard deviations from the prediction restarts the track.
+    pub track_reset_sigma: f64,
+    /// A new pseudonym joins an old track if within this distance of its prediction (m). SPEC §6: 3 m.
+    pub track_link_max_dist_m: f64,
+    /// ... and this speed difference (m/s). SPEC §6: 2 m/s.
+    pub track_link_max_speed_diff: f64,
+    /// ... and the old track was heard within this time (s).
+    pub track_link_max_gap_s: f64,
+    /// Use the road map (when the platform supplies one) for the confidence gate and lane snapping.
+    pub map_matching: bool,
+    /// Ignore a predicted conflict that already exists now (outlines overlapping at the
+    /// first step) while the pair is not closing: stopped neighbours in a queue, made to
+    /// overlap by the position-uncertainty margins. Step 4.
+    pub ignore_static_overlap: bool,
+    /// ... "not closing" means closing slower than this (m/s).
+    pub static_overlap_closing: f64,
+    /// A vehicle slower than this in my path is an obstacle I must avoid whatever its
+    /// direction (a stopped car across the junction, a wreck). `None` = reference rules.
+    pub obstacle_speed: Option<f64>,
+    /// SPEC §8 "Not yielding" also for crossing traffic, and only when the vehicle that
+    /// must give way is braking less than this (m/s², > 0). `None` = reference behaviour
+    /// (never for crossing traffic, no braking check).
+    pub not_yielding_max_decel: Option<f64>,
+    /// SPEC §8 (user decision, Step 4): "crossing conflict" and "hard braking ahead" are
+    /// Danger only when the collision prediction confirms the paths meet (within
+    /// `yield_pet_s` at the crossing, or the braking vehicle is inside my stopping
+    /// distance); otherwise they are a Warning with the same braking advice.
+    pub danger_needs_confirmation: bool,
+    /// Reaction time used for "inside my stopping distance" (s).
+    pub stopping_reaction_s: f64,
+    /// SPEC §6 confidence gate: no Warning/Danger from tracks matched below this.
+    pub map_min_confidence: f64,
+    /// Heading error at which the heading likelihood falls to 0.61 (degrees).
+    pub map_heading_sigma_deg: f64,
+    /// Position likelihood uses this × the reported accuracy: phones report a ~68 % radius,
+    /// so a fix 1× outside the road edge is still ordinary noise (Step 4 simulation).
+    pub map_position_sigma_factor: f64,
+    /// Snap the heading to the road only when it is within this of the road direction (degrees).
+    pub map_snap_max_heading_deg: f64,
+    /// ... and the reported turn rate is below this (rad/s); the turn rate is then set to 0.
+    pub map_snap_max_yaw_rate: f64,
+    /// Inside a junction, a track is kept on its side only if this well aligned with a road
+    /// (degrees) and not turning (Step 4).
+    pub map_junction_snap_max_heading_deg: f64,
+    /// Same-direction vehicles cannot be put in a lane when their combined position error
+    /// exceeds this (m). Such rear-end conflicts are checked with the lateral error added
+    /// and raise a Warning; they become Danger only below `ttc_brake_s`. `None` = off.
+    pub lane_resolve_sigma_m: Option<f64>,
+    /// SPEC §10: a sender this far outside any road is misbehaviour (m). `None` = check off.
+    pub off_road_max_m: Option<f64>,
+    /// ... unless it is this far from every road: outside the map's coverage (m).
+    pub map_coverage_m: f64,
 
     // ---------------------------------------------------------------- relay (SPEC §5; full rules in Step 7)
     /// Initial TTL of heartbeats: how many times they may be forwarded.
@@ -254,7 +324,7 @@ impl Security {
     pub fn v0() -> Self {
         Self {
             pseudonym_rotate_s: 300.0,
-            full_cert_interval_s: 1.0,
+            full_cert_interval_s: 0.3, // every 3rd message at 10 Hz (user decision, Step 4)
             full_cert_after_rotation_s: 2.0,
             cert_validity_s: 7 * 24 * 3600,
             certs_per_window: 20,
@@ -303,8 +373,35 @@ impl Config {
             duplicate_cache_s: 5.0,
             jump_speed_factor: 1.5,
             jump_speed_slack: 10.0,
+            jump_slack_m: None,
+            jump_slack_accuracy_factor: 0.0,
+            jump_slack_accuracy_cap_m: 20.0,
             max_alert_pos_accuracy_m: f64::INFINITY,
             low_confidence_caution: false,
+
+            tracking: false,
+            track_process_noise_m2_s: 0.5,
+            track_speed_noise: 0.3,
+            track_reset_sigma: 5.0,
+            track_link_max_dist_m: 3.0,
+            track_link_max_speed_diff: 2.0,
+            track_link_max_gap_s: 1.5,
+            map_matching: false,
+            ignore_static_overlap: false,
+            static_overlap_closing: 0.5,
+            obstacle_speed: None,
+            danger_needs_confirmation: false,
+            stopping_reaction_s: 1.0,
+            not_yielding_max_decel: None,
+            map_min_confidence: 0.7,
+            map_heading_sigma_deg: 20.0,
+            map_position_sigma_factor: 2.0,
+            map_snap_max_heading_deg: 30.0,
+            map_snap_max_yaw_rate: 0.1,
+            map_junction_snap_max_heading_deg: 15.0,
+            lane_resolve_sigma_m: None,
+            off_road_max_m: None,
+            map_coverage_m: 1000.0,
 
             heartbeat_ttl: 8,
             event_ttl: 8,
@@ -391,6 +488,18 @@ impl Config {
             // §6 confidence gate (8 m), with a Caution fallback (user decision, Step 2)
             max_alert_pos_accuracy_m: 8.0,
             low_confidence_caution: true,
+            // §10: position jump beyond speed × time + 15 m
+            jump_slack_m: Some(15.0),
+            jump_slack_accuracy_factor: 3.0,
+            // §6 tracking and map matching (Step 4); §10 off-road check
+            tracking: true,
+            map_matching: true,
+            lane_resolve_sigma_m: Some(1.5),
+            ignore_static_overlap: true,
+            obstacle_speed: Some(2.0),
+            danger_needs_confirmation: true,
+            not_yielding_max_decel: Some(1.0),
+            off_road_max_m: Some(50.0),
             // §5 rule 1: heartbeats TTL 2, events TTL 5
             heartbeat_ttl: 2,
             event_ttl: 5,
@@ -446,6 +555,7 @@ mod tests {
         assert!((c.hazard_advisory_speed - 25.0).abs() < 1e-9);
         assert_eq!(c.score_model, ScoreModel::ReferenceTime);
         assert!(!c.spec_alerts);
+        assert!(!c.tracking && !c.map_matching && c.off_road_max_m.is_none()); // not in the reference
     }
 
     #[test]
@@ -520,6 +630,22 @@ mod tests {
         );
         assert!((c.own_speeding_enter - 5.0 * kmh).abs() < 1e-9 && c.own_speeding_exit == 0.0);
         assert_eq!(c.event_repeats, 3); // §3
+        assert!(c.tracking && c.map_matching); // §6
+        assert_eq!(c.map_min_confidence, 0.7); // §6 confidence gate
+        assert_eq!(
+            (c.track_link_max_dist_m, c.track_link_max_speed_diff),
+            (3.0, 2.0)
+        ); // §6
+        assert_eq!(c.off_road_max_m, Some(50.0)); // §10
+        assert_eq!(c.jump_slack_m, Some(15.0)); // §10
+        assert_eq!(
+            (c.jump_slack_accuracy_factor, c.jump_slack_accuracy_cap_m),
+            (3.0, 20.0)
+        );
+        assert!(c.ignore_static_overlap);
+        assert!(c.danger_needs_confirmation); // user decision, Step 4
+        assert_eq!(c.obstacle_speed, Some(2.0));
+        assert_eq!(c.not_yielding_max_decel, Some(1.0)); // §8 "is not slowing"
         assert!(c.spec_alerts);
     }
 
@@ -533,7 +659,7 @@ mod tests {
             assert_eq!(s.revoke_after_reporters, 3); // CLAUDE.md
             assert_eq!(
                 (s.full_cert_interval_s, s.full_cert_after_rotation_s),
-                (1.0, 2.0)
+                (0.3, 2.0) // user decision, Step 4
             );
             assert_eq!(s.verify_sample_above_peers, None); // v1: verify every message
             assert_eq!(s.verify_sample_every, 4); // §10: 1 in 4 when enabled
