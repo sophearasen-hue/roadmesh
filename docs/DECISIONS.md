@@ -49,4 +49,9 @@ Decisions taken during the build, with who decided and where they are implemente
 | 2026-11-24 | Apps cannot choose the Bluetooth address type (system API); Android's default random private address is used and renewed by restarting advertising. To be confirmed with a sniffer in the device test | Engineering (Step 5) | `BleRadio.kt` |
 | 2026-11-24 | Safety messages travel as service data under a 128-bit RoadMesh UUID in non-connectable extended advertisements, 100 ms interval, Coded PHY when supported | Engineering (Step 5) | `BleRadio.kt`, SPEC §4 |
 | 2026-11-24 | cargo-audit exception: `basic-toml` unmaintained (RUSTSEC-2026-0374), used only by the UniFFI binding generator at build time, not linked into the app | Engineering (Step 5) | `.cargo/audit.toml` |
+| 2026-11-24 | iPhones send by short Bluetooth connections (GATT notifications to phones that subscribe), because iOS advertises only ~28 bytes; Android connects to iPhones (up to 6) and subscribes. Sending over 4G is added in Step 9 as a fallback | Product owner (Step 6, option A) | `ios/`, `android/.../BleRadio.kt` |
+| 2026-11-24 | Step 6 is built in this cloud session and verified on GitHub's macOS runner (XCFramework, Swift tests, simulator build); the iPhone + Android field test needs a Mac and both phones | Product owner (Step 6) | CI `ios` job, `ios/README.md` |
+| 2026-11-24 | Frames over GATT are cut into `[frame_no][index][count][payload]` fragments; reassembly of untrusted bytes is in the Rust core, length-checked and fuzzed | Engineering (Step 6) | `core/src/fragment.rs`, fuzz target `fragments` |
+| 2026-11-24 | The radio Dart API moves into the app (`app/lib/radio.dart`); both plugins serve the same `roadmesh/radio` channels | Engineering (Step 6) | `app/lib/radio.dart` |
+| 2026-11-24 | The iOS plugin builds with Swift Package Manager (no CocoaPods podspec); pure helpers live in `ios/RoadMeshKit` so `swift test` runs without Flutter | Engineering (Step 6) | `ios/` |
 

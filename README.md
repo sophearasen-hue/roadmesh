@@ -24,7 +24,7 @@ Peer-to-peer road safety for every vehicle — cars, motorbikes, tuk-tuks — on
 | `docs/DECISIONS.md` | Decisions taken during the build | Updated each step |
 | `app/` | Flutter app, strings in `lib/l10n/app_en.arb` / `app_km.arb` | Skeleton (Step 8) |
 | `android/` | Flutter plugin `roadmesh_android`: Bluetooth LE transport, foreground service, Keystore keys, field-test log; runs the Rust core | Step 5 (field test pending) |
-| `ios/` | Swift radio, Secure Enclave keys, CarPlay | Placeholder (Steps 6, 10) |
+| `ios/` | Flutter plugin `roadmesh_ios`: CoreBluetooth transport (iPhones send by GATT notifications), Secure Enclave keys; `ios/RoadMeshKit` Swift helpers | Step 6 (field test pending); CarPlay in Step 10 |
 | `ffi/` | UniFFI bindings from the phone apps to `core/` | Step 5 |
 | `tools/devca` | Developer certificate authority for field tests (debug builds only) | Step 5 |
 | `docs/DATA_SAFETY.md` | Store privacy answers, kept in step with the code | Updated each step |

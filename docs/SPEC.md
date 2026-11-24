@@ -106,6 +106,8 @@ All ranges are planning estimates. Measure them in the Phase 0 field test (secti
 
 *Implementation note (Step 5, Android).* Each frame (up to 218 bytes) travels in one non-connectable Bluetooth LE extended advertisement as service data under the 128-bit RoadMesh UUID `4b6e7a10-2d3c-4e5f-8a9b-0c1d2e3f4a5b`, every 100 ms, on Coded PHY where the phone supports it (otherwise 1M). One long-running scan with a filter on that UUID hears everyone. No connections or pairing. Phones without extended advertising are receive-only. The safety engine runs in a foreground service (type `connectedDevice` + `location`). The advertising address is Android's random private address, renewed by restarting the advertising set whenever the pseudonym changes; pseudonyms change only when stopped or at a junction, at most 5 minutes late (AUDIT S-13).
 
+*Implementation note (Step 6, iOS).* iOS advertises only service UUIDs, so an iPhone advertises the RoadMesh UUID and sends each frame as GATT notifications on characteristic `4b6e7a11-2d3c-4e5f-8a9b-0c1d2e3f4a5b`, cut into `[frame_no][index][count][payload]` fragments to fit the link (MTU 247 requested). Android phones and other iPhones connect (at most 6 links) and subscribe; links unheard for 5 s are dropped. iPhones hear Android phones' extended advertisements where the hardware reports them. In the background, iOS advertises only to other iPhones, so the app keeps Drive mode on screen (CarPlay, Step 10); sending over 4G (Step 9) is the fallback.
+
 ## 5. Mesh relay protocol
 
 Phones re-broadcast what they hear, so a warning can travel several hops beyond one radio's range. The rules below keep that from flooding the channel.
