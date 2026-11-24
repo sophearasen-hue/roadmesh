@@ -229,6 +229,17 @@ struct AlertState {
     own_speeding: bool,
 }
 
+#[derive(Debug, Clone)]
+struct PendingRelay {
+    key: (TempId, u16),
+    due: f64,
+    hop: u8,
+    /// Signed part of the original, to recognise a genuine copy (not a forgery).
+    signed: [u8; rsm::BODY_LEN],
+    auth: Vec<u8>,
+    frame: Frame,
+}
+
 /// The safety engine of one phone.
 #[derive(Debug, Clone)]
 pub struct Obu {
@@ -252,6 +263,12 @@ pub struct Obu {
     /// Smoothed own position.
     own_filter: OwnFilter,
     outbox: Vec<Frame>,
+    /// SPEC §5 rule 3: relays waiting for their back-off, cancelled if someone relays first.
+    pending: Vec<PendingRelay>,
+    /// Messages this phone has relayed (never twice, rule 2), with when.
+    relayed: HashMap<(TempId, u16), f64>,
+    /// Own heartbeats skipped under congestion (rule 6).
+    congestion_skip: bool,
     msg_id: u16,
     state: DriveState,
     yield_to: Option<TempId>,
@@ -330,6 +347,9 @@ impl Obu {
             tracker: Tracker::new(),
             own_filter: OwnFilter::default(),
             outbox: Vec::new(),
+            pending: Vec::new(),
+            relayed: HashMap::new(),
+            congestion_skip: false,
             msg_id: 0,
             state: DriveState::Cruise,
             yield_to: None,
@@ -444,6 +464,7 @@ impl Obu {
         signer: &mut dyn Signer,
     ) -> Vec<Frame> {
         let mut out = std::mem::take(&mut self.outbox);
+        out.extend(self.due_relays(now));
         let Some(temp_id) = signer.current_temp_id(now) else {
             return out; // no valid certificate: receive and relay only, never send unsigned
         };
@@ -481,6 +502,15 @@ impl Obu {
             EventCode::None
         };
         let is_event = event != EventCode::None;
+        // SPEC §5 rule 6: in congestion send heartbeats at half rate (events always)
+        if c.relay_rules && !is_event && self.ldm.len() > c.congestion_peers {
+            self.congestion_skip = !self.congestion_skip;
+            if self.congestion_skip {
+                return out;
+            }
+        } else {
+            self.congestion_skip = false;
+        }
         let mut fl = 0;
         if m.accel <= -c.hard_brake_ahead_decel {
             fl |= flags::HARD_BRAKE;
@@ -562,6 +592,15 @@ impl Obu {
         if self.ldm.has_seen(&r.temp_id, r.msg_id) {
             // A copy of a message already verified and accepted (normal with relaying).
             // Dropping a forged copy is harmless: only verified messages enter the cache.
+            // SPEC §5 rule 3: someone else relayed it first, so cancel ours, but only for a
+            // copy whose signed bytes and signature equal the original (not a forgery).
+            let signed = rsm::signing_bytes(&frame.body);
+            self.pending.retain(|p| {
+                !(p.key == (r.temp_id, r.msg_id)
+                    && r.hop_count >= p.hop
+                    && p.signed == signed
+                    && p.auth == frame.auth)
+            });
             return RxOutcome::Dropped;
         }
         let auth = if self.sample_skip(&r) {
@@ -611,8 +650,19 @@ impl Obu {
             self.tracker
                 .update(r.temp_id, &msg.motion, msg.pos_accuracy_m, msg.t, &self.cfg);
         }
+        // SPEC §5 rule 5: information from more than 1.5 km away cannot change the next 6 s
+        if self.cfg.relay_rules
+            && r.hop_count > 0
+            && (msg.motion.x - own.motion.x).hypot(msg.motion.y - own.motion.y)
+                > self.cfg.relay_cutoff_m
+        {
+            self.ldm.remove(&r.temp_id);
+            return RxOutcome::Dropped;
+        }
         // Store-and-forward once per message. Only verified, plausible, new messages are relayed.
-        if self.relay && r.ttl > 0 {
+        if self.relay && r.ttl > 0 && self.cfg.relay_rules {
+            self.schedule_relay(frame, &r, &msg, now, own);
+        } else if self.relay && r.ttl > 0 {
             let (hx, hy) = match frame.last_hop {
                 Some((lat, lon)) => self.origin.to_local(lat, lon),
                 None => (msg.motion.x, msg.motion.y),
@@ -636,6 +686,84 @@ impl Obu {
             temp_id: r.temp_id,
             hops: r.hop_count,
         }
+    }
+
+    /// SPEC §5 rules 2–4 and 6: decide whether to relay and when.
+    fn schedule_relay(&mut self, frame: &Frame, r: &Rsm, msg: &PeerMsg, now: f64, own: &OwnState) {
+        let c = &self.cfg;
+        let key = (r.temp_id, r.msg_id);
+        if self.relayed.contains_key(&key) {
+            return; // rule 2: never twice
+        }
+        let is_event = r.msg_type == MsgType::Event;
+        if !is_event && self.ldm.len() > c.congestion_peers {
+            return; // rule 6: under congestion relay only events
+        }
+        let me = &own.motion;
+        let (hx, hy) = match frame.last_hop {
+            Some((lat, lon)) => self.origin.to_local(lat, lon),
+            None => (msg.motion.x, msg.motion.y),
+        };
+        let from_hop = (me.x - hx).hypot(me.y - hy);
+        if from_hop < c.relay_min_progress_m {
+            return;
+        }
+        if !is_event {
+            // rule 4: along the sender's road, moving away from it
+            let (s, k) = msg.motion.heading.sin_cos();
+            let (dx, dy) = (me.x - msg.motion.x, me.y - msg.motion.y);
+            let sideways = (-dx * s + dy * k).abs();
+            let parallel = (me.heading - msg.motion.heading).cos().abs() > 0.8;
+            let away = dx * me.heading.cos() + dy * me.heading.sin() > 0.0 || me.speed < 0.5;
+            if sideways > c.relay_road_width_m || !parallel || !away {
+                return;
+            }
+        }
+        // rule 3: the farthest phones relay first (0 ms at radio range, the maximum at the
+        // minimum progress)
+        let span = (c.relay_backoff_range_m - c.relay_min_progress_m).max(1.0);
+        let near = 1.0 - ((from_hop - c.relay_min_progress_m) / span).clamp(0.0, 1.0);
+        let backoff = c.relay_backoff_max_s * near;
+        let mut fwd = *r;
+        fwd.hop_count = r.hop_count.saturating_add(1).min(15);
+        fwd.ttl = r.ttl - 1;
+        fwd.origin_pos_age_ms = ((now - msg.t).max(0.0) * 1000.0)
+            .round()
+            .min(f64::from(u16::MAX)) as u16;
+        self.pending.push(PendingRelay {
+            key,
+            due: now + backoff,
+            hop: fwd.hop_count,
+            signed: rsm::signing_bytes(&frame.body),
+            auth: frame.auth.clone(),
+            frame: Frame {
+                last_hop: Some(self.origin.to_latlon(me.x, me.y)),
+                body: fwd.encode(),
+                auth: frame.auth.clone(),
+            },
+        });
+    }
+
+    /// Relays whose back-off has ended (SPEC §5 rule 3). The platform may call this more
+    /// often than [`Obu::transmit`] for finer timing; `transmit` includes them too.
+    pub fn due_relays(&mut self, now: f64) -> Vec<Frame> {
+        let (due, wait): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pending)
+            .into_iter()
+            .partition(|p| p.due <= now + 1e-9);
+        self.pending = wait;
+        let keep = self.cfg.duplicate_cache_s;
+        self.relayed.retain(|_, t| now - *t <= keep);
+        due.into_iter()
+            .map(|p| {
+                self.relayed.insert(p.key, now);
+                p.frame
+            })
+            .collect()
+    }
+
+    /// Messages this phone has relayed in the last few seconds (for tests and statistics).
+    pub fn relayed_count(&self) -> usize {
+        self.relayed.len()
     }
 
     // ------------------------------------------------------------ right of way
@@ -2017,6 +2145,195 @@ mod tests {
             body,
             auth: Vec::new(),
         }
+    }
+
+    // ------------------------------------------------------------ SPEC §5 relay rules
+
+    fn relay_obu() -> Obu {
+        Obu::new(Config::spec_v0(), GeoOrigin::phnom_penh(), true)
+    }
+
+    fn as_event(f: &Frame) -> Frame {
+        let Ok(mut r) = Rsm::decode(&f.body) else {
+            unreachable!()
+        };
+        r.msg_type = MsgType::Event;
+        r.event = EventCode::HardBrake;
+        r.ttl = 5;
+        Frame {
+            body: r.encode(),
+            ..f.clone()
+        }
+    }
+
+    fn hb_east(id: &[u8; 4], msg_id: u16) -> Frame {
+        peer(id, msg_id, 0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0, 3.0)
+    }
+
+    #[test]
+    fn relay_backoff_is_shorter_the_farther_from_the_last_hop() {
+        let mut far = relay_obu();
+        let mut near = relay_obu();
+        let f = hb_east(b"SEND", 1);
+        far.receive(&f, 0.0, &own(150.0, 0.0, 0.0, 10.0), &mut NoAuth);
+        near.receive(&f, 0.0, &own(100.0, 0.0, 0.0, 10.0), &mut NoAuth);
+        assert_eq!(far.due_relays(0.0).len(), 1); // at radio range: at once
+        assert!(near.due_relays(0.0).is_empty()); // nearest: waits the full 60 ms
+        assert!(near.due_relays(0.059).is_empty());
+        assert_eq!(near.due_relays(0.06).len(), 1);
+        // too close to the last hop: no relay at all (unchanged rule)
+        let mut close = relay_obu();
+        close.receive(&f, 0.0, &own(60.0, 0.0, 0.0, 10.0), &mut NoAuth);
+        assert!(close.due_relays(1.0).is_empty());
+    }
+
+    #[test]
+    fn a_relay_heard_first_cancels_mine_but_a_forged_copy_does_not() {
+        let me = own(110.0, 0.0, 0.0, 10.0);
+        let f = hb_east(b"SEND", 1);
+        let Ok(mut r) = Rsm::decode(&f.body) else {
+            unreachable!()
+        };
+        r.hop_count = 1;
+        r.ttl = 1;
+        let relayed_by_other = Frame {
+            last_hop: Some(GeoOrigin::phnom_penh().to_latlon(140.0, 0.0)),
+            body: r.encode(),
+            auth: f.auth.clone(),
+        };
+        let forged = Frame {
+            auth: vec![1, 2, 3],
+            ..relayed_by_other.clone()
+        };
+        let mut a = relay_obu();
+        a.receive(&f, 0.0, &me, &mut NoAuth);
+        a.receive(&forged, 0.01, &me, &mut NoAuth);
+        assert_eq!(
+            a.due_relays(0.1).len(),
+            1,
+            "a forged copy cancelled the relay"
+        );
+        let mut b = relay_obu();
+        b.receive(&f, 0.0, &me, &mut NoAuth);
+        b.receive(&relayed_by_other, 0.01, &me, &mut NoAuth);
+        assert!(b.due_relays(0.1).is_empty());
+    }
+
+    #[test]
+    fn a_phone_never_relays_the_same_message_twice() {
+        let me = own(200.0, 0.0, 0.0, 10.0);
+        let mut a = relay_obu();
+        let f = hb_east(b"SEND", 7);
+        a.receive(&f, 0.0, &me, &mut NoAuth);
+        assert_eq!(a.due_relays(0.0).len(), 1);
+        // the cache forgets (as after expiry) and the same message arrives again
+        a.ldm.remove(b"SEND");
+        a.receive(&f, 0.5, &me, &mut NoAuth);
+        assert!(a.due_relays(1.0).is_empty());
+        assert_eq!(a.relayed_count(), 1);
+    }
+
+    #[test]
+    fn heartbeats_are_relayed_only_along_the_road_away_from_the_sender() {
+        let f = hb_east(b"SEND", 1);
+        let cases = [
+            (own(200.0, 0.0, 0.0, 10.0), 1),      // ahead, same road, moving away
+            (own(200.0, 2.0, PI, 10.0), 0),       // ahead but driving back towards it
+            (own(0.0, 200.0, PI / 2.0, 10.0), 0), // on a crossing road
+            (own(200.0, 60.0, 0.0, 10.0), 0),     // parallel road 60 m to the side
+            (own(200.0, 0.0, 0.0, 0.0), 1),       // parked on the road ahead
+        ];
+        for (me, n) in cases {
+            let mut a = relay_obu();
+            a.receive(&f, 0.0, &me, &mut NoAuth);
+            assert_eq!(a.due_relays(1.0).len(), n, "{:?}", me.motion);
+            // events go in all directions
+            let mut b = relay_obu();
+            b.receive(&as_event(&f), 0.0, &me, &mut NoAuth);
+            assert_eq!(b.due_relays(1.0).len(), 1, "event {:?}", me.motion);
+        }
+    }
+
+    #[test]
+    fn relayed_information_from_beyond_1_5_km_is_dropped() {
+        let me = own(0.0, 0.0, 0.0, 10.0);
+        let mut far = peer(b"FARR", 1, 0.0, 1600.0, 0.0, 0.0, 10.0, 0.0, 0, 3.0);
+        let Ok(mut r) = Rsm::decode(&far.body) else {
+            unreachable!()
+        };
+        r.hop_count = 2;
+        far.body = r.encode();
+        far.last_hop = Some(GeoOrigin::phnom_penh().to_latlon(150.0, 0.0));
+        let mut a = relay_obu();
+        assert_eq!(a.receive(&far, 0.0, &me, &mut NoAuth), RxOutcome::Dropped);
+        assert!(a.ldm().get(b"FARR").is_none());
+        // heard directly (hop 0) the same distance is not cut off by this rule
+        let direct = peer(b"DIRC", 1, 0.0, 1400.0, 0.0, 0.0, 10.0, 0.0, 0, 3.0);
+        assert!(matches!(
+            a.receive(&direct, 0.0, &me, &mut NoAuth),
+            RxOutcome::Accepted { .. }
+        ));
+    }
+
+    #[test]
+    fn congestion_halves_heartbeats_and_relays_only_events() {
+        let me = own(200.0, 0.0, 0.0, 10.0);
+        let mut a = relay_obu();
+        // 61 peers spread along a parallel road far behind (no alerts, no relaying)
+        for k in 0..=60u8 {
+            let id = [b'P', k, 0, 1];
+            let f = peer(
+                &id,
+                1,
+                0.0,
+                -400.0 - f64::from(k) * 10.0,
+                300.0,
+                0.0,
+                10.0,
+                0.0,
+                0,
+                3.0,
+            );
+            a.receive(&f, 0.0, &me, &mut NoAuth);
+        }
+        a.due_relays(0.0);
+        assert!(a.ldm().len() > 60);
+        let f = hb_east(b"SEND", 1);
+        a.receive(&f, 0.0, &me, &mut NoAuth);
+        assert!(
+            a.due_relays(1.0).is_empty(),
+            "heartbeat relayed in congestion"
+        );
+        a.receive(&as_event(&hb_east(b"EVNT", 1)), 0.0, &me, &mut NoAuth);
+        assert_eq!(a.due_relays(1.0).len(), 1);
+        // own heartbeats: every other transmit
+        let sent: usize = (0..10)
+            .map(|k| {
+                a.transmit(
+                    0.1 * f64::from(k),
+                    &me,
+                    &RoadContext::default(),
+                    &mut FixedId(*b"MEME"),
+                )
+                .len()
+            })
+            .sum();
+        assert_eq!(sent, 5);
+        // the reference profile keeps relaying immediately and sending every cycle
+        let mut r = Obu::new(Config::reference(), GeoOrigin::phnom_penh(), true);
+        assert!(!r.cfg.relay_rules);
+        let sent: usize = (0..10)
+            .map(|k| {
+                r.transmit(
+                    0.1 * f64::from(k),
+                    &me,
+                    &RoadContext::default(),
+                    &mut FixedId(*b"MEME"),
+                )
+                .len()
+            })
+            .sum();
+        assert_eq!(sent, 10);
     }
 
     fn spec() -> Obu {

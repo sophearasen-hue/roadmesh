@@ -120,6 +120,8 @@ Phones re-broadcast what they hear, so a warning can travel several hops beyond 
 6. **Congestion control.** If a phone hears more than 60 distinct peers, it halves its heartbeat rate and relays only event messages.
 7. **Freshness.** Discard a relayed heartbeat older than 1 s, and an event older than 10 s.
 
+*Implementation note (Step 7).* All seven rules run in the core (`relay_rules`, product profile only; the reference profile keeps its immediate relaying so the golden tests stay exact). Distances in rules 3 and 4 are measured from the last hop's position in the radio frame. A relay still needs at least 100 m of progress from the last hop; the back-off then falls from 60 ms at 100 m to 0 ms at 150 m (one radio range). A pending relay is cancelled only by a copy whose signed bytes and signature equal the original, so a forged copy cannot silence a relay. Rule 4 counts a phone as on the sender's road within 15 m sideways and ±37° of its heading; a stopped phone counts as moving away. Rule 5 applies to relayed messages (hop count above 0); the peer is dropped from the map. Rule 6 counts peers in the local map. The platform may call `due_relays` between transmit cycles for finer back-off timing.
+
 **Cellular bridge.** A phone with 4G uploads its own RSM and any event messages it hears to the regional edge server. The server pushes events to subscribed phones in the same map cells. This joins up mesh islands that cannot hear each other by radio.
 
 ## 6. Local Dynamic Map, tracking and prediction

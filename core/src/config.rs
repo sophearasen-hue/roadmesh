@@ -162,6 +162,19 @@ pub struct Config {
     pub event_ttl: u8,
     /// Relay only if at least this far from the previous hop (m).
     pub relay_min_progress_m: f64,
+    /// SPEC §5 rules 3–6 (Step 7). False = the reference's immediate relaying.
+    pub relay_rules: bool,
+    /// Rule 3: the nearest phone waits this long before relaying, the farthest 0 (s).
+    pub relay_backoff_max_s: f64,
+    /// Rule 3: distance at which the back-off reaches 0 (m), about one radio range.
+    pub relay_backoff_range_m: f64,
+    /// Rule 4: a heartbeat is relayed only by phones on the sender's road (within this
+    /// sideways offset, m) and moving away from it.
+    pub relay_road_width_m: f64,
+    /// Rule 5: relayed messages whose origin is farther than this are dropped (m).
+    pub relay_cutoff_m: f64,
+    /// Rule 6: above this many peers, send heartbeats at half rate and relay only events.
+    pub congestion_peers: usize,
 
     // ---------------------------------------------------------------- hazard ahead (stopped traffic)
     /// Look this far ahead for stopped traffic (m).
@@ -410,6 +423,12 @@ impl Config {
             heartbeat_ttl: 8,
             event_ttl: 8,
             relay_min_progress_m: 100.0,
+            relay_rules: false,
+            relay_backoff_max_s: 0.06,
+            relay_backoff_range_m: 150.0,
+            relay_road_width_m: 15.0,
+            relay_cutoff_m: 1500.0,
+            congestion_peers: 60,
 
             hazard_range_m: 3000.0,
             hazard_stopped_speed: 3.0,
@@ -504,6 +523,8 @@ impl Config {
             danger_needs_confirmation: true,
             not_yielding_max_decel: Some(1.0),
             off_road_max_m: Some(50.0),
+            // §5 rules 3–6: back-off, direction filter, 1.5 km cut-off, congestion control
+            relay_rules: true,
             // §5 rule 1: heartbeats TTL 2, events TTL 5
             heartbeat_ttl: 2,
             event_ttl: 5,
@@ -648,6 +669,11 @@ mod tests {
         );
         assert!(c.ignore_static_overlap);
         assert!(c.danger_needs_confirmation); // user decision, Step 4
+        assert!(c.relay_rules); // §5
+        assert_eq!(
+            (c.relay_backoff_max_s, c.relay_cutoff_m, c.congestion_peers),
+            (0.06, 1500.0, 60)
+        );
         assert_eq!(c.obstacle_speed, Some(2.0));
         assert_eq!(c.not_yielding_max_decel, Some(1.0)); // §8 "is not slowing"
         assert!(c.spec_alerts);

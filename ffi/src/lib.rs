@@ -365,6 +365,18 @@ impl SafetyEngine {
             .collect()
     }
 
+    /// Relays whose back-off (SPEC §5 rule 3, up to 60 ms) has ended. Optional: the
+    /// platform may call this between transmit cycles for finer timing; `transmit`
+    /// always includes them.
+    pub fn due_relays(&self, now: f64) -> Vec<Vec<u8>> {
+        self.lock()
+            .obu
+            .due_relays(now)
+            .iter()
+            .filter_map(|f| f.encode())
+            .collect()
+    }
+
     /// The pseudonym in use at `now` (empty if none). When it changes, the platform
     /// restarts advertising so the Bluetooth address changes with it (AUDIT S-13).
     pub fn pseudonym(&self, now: f64) -> Vec<u8> {
