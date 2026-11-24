@@ -21,6 +21,7 @@ import com.roadmesh.core.PeerInfo
 import com.roadmesh.core.RoadInfo
 import com.roadmesh.core.TripInfo
 import com.roadmesh.core.EventInfo
+import com.roadmesh.core.LinkEvent
 import com.roadmesh.core.RxResult
 import com.roadmesh.core.SafetyEngine
 import kotlin.math.cos
@@ -44,6 +45,7 @@ class DriveService : Service() {
     private var lastPseudonym = ""
     private var ticks = 0L
     private val fieldLog = FieldLog()
+    private var bridge: CellularBridge? = null
 
     private val listener = LocationListener { loc ->
         prevLocation = location
@@ -75,10 +77,14 @@ class DriveService : Service() {
     }
 
     private fun start(first: Location) {
-        val anchors = listOfNotNull(Crypto.unhex(BuildConfig.DEV_CA_ANCHOR)?.takeIf { it.size == 34 })
+        val anchors = listOfNotNull(
+            Crypto.unhex(BuildConfig.CA_ANCHOR)?.takeIf { it.size == 34 },
+            Crypto.unhex(BuildConfig.DEV_CA_ANCHOR)?.takeIf { it.size == 34 }, // debug builds only
+        )
         val e = SafetyEngine(first.latitude, first.longitude, anchors, keys, false)
         enrolment.storedCertificates()?.let { runCatching { e.addCertificates(it, now()) } }
         engine = e
+        startBridge(e)
         radio.startScan()
         handler.post(tick)
     }
@@ -112,7 +118,9 @@ class DriveService : Service() {
             val e = engine ?: return
             val t = now()
             fixAt(t)?.let { fix ->
-                e.transmit(t, fix, road).firstOrNull()?.let { radio.broadcast(it) }
+                val frames = e.transmit(t, fix, road)
+                frames.firstOrNull()?.let { radio.broadcast(it) }
+                frames.forEach { bridge?.upload(it) } // hazard events only
                 val p = Crypto.hex(e.pseudonym(t))
                 if (p != lastPseudonym) {
                     if (lastPseudonym.isNotEmpty()) radio.renewAddress()
@@ -122,6 +130,8 @@ class DriveService : Service() {
                 val peers = e.peers(t, fix)
                 ticks++
                 if (ticks % 10 == 0L) {
+                    bridge?.followPosition(fix.lat, fix.lon)
+                    e.takeReports().forEach { bridge?.report(it) }
                     fieldLog.everySecond(peers.associate { Crypto.hex(it.pseudonym) to it.distanceM })
                     radio.pruneLinks()
                 }
@@ -135,12 +145,46 @@ class DriveService : Service() {
         }
     }
 
+    /** The 4G link (docs/SERVER.md), if this build is configured for a server. */
+    private fun startBridge(e: SafetyEngine) {
+        val config = ServerConfig.fromBuild() ?: return
+        val b = CellularBridge(config, {
+            enrolment.deviceCertificate()?.let { PinnedTls.DeviceKeyManager(KeystoreKeys.DEVICE_ALIAS, it) }
+        }) { ev -> handler.post { onCellular(ev) } }
+        bridge = b
+        b.start()
+        // no certificates or no device certificate yet: enrol online (Play Integrity)
+        if (e.validCertificates(now()) < 5u || enrolment.deviceCertificate() == null) {
+            Thread({
+                runCatching { enrolment.enrolOnline(config) }.onSuccess { batch ->
+                    handler.post { runCatching { engine?.addCertificates(batch, now()) } }
+                }
+            }, "roadmesh-enrol").start()
+        }
+    }
+
+    /** From the server: checked by the engine like any radio frame. */
+    private fun onCellular(ev: LinkEvent) {
+        val e = engine ?: return
+        when (ev) {
+            is LinkEvent.HazardEvent -> {
+                val t = now()
+                fixAt(t)?.let { e.receive(ev.frame, t, it) }
+            }
+            is LinkEvent.RevocationList -> runCatching { e.loadRevocationList(ev.list) }
+            else -> {}
+        }
+    }
+
     private fun onFrame(frame: ByteArray, rssi: Int) {
         val e = engine ?: return
         val t = now()
         val fix = fixAt(t) ?: return
         val r = e.receive(frame, t, fix)
-        if (r is RxResult.Accepted) fieldLog.onAccepted(Crypto.hex(r.pseudonym), rssi)
+        if (r is RxResult.Accepted) {
+            fieldLog.onAccepted(Crypto.hex(r.pseudonym), rssi)
+            bridge?.upload(frame) // events heard by radio reach phones out of range
+        }
     }
 
     private fun battery(): Int =
@@ -161,6 +205,8 @@ class DriveService : Service() {
         handler.removeCallbacks(tick)
         getSystemService(LocationManager::class.java).removeUpdates(listener)
         if (::radio.isInitialized) radio.stop()
+        bridge?.stop()
+        bridge = null
         engine?.close()
         engine = null
         instance = null
@@ -180,6 +226,7 @@ class DriveService : Service() {
     fun deleteMyData() {
         engine?.deleteMyData()
         fieldLog.clear()
+        bridge?.deleteMyData()
     }
 
     fun createCertificateRequest(): String = enrolment.createRequest().absolutePath
