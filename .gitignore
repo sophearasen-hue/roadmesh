@@ -32,3 +32,6 @@ app/lib/l10n/app_localizations*.dart
 # developer CA keys (scripts/devca) never go into git
 devca-key.bin
 .devca/
+
+# Apple App Attestation Root CA: a public certificate, pinned in the server binary
+!server/src/apple_app_attestation_root_ca.pem
