@@ -279,6 +279,7 @@ pub fn parse_enrol_reply(reply: Vec<u8>) -> Result<Enrolled, RoadMeshError> {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
 

@@ -199,7 +199,7 @@ async fn hard_braking_reaches_a_phone_450_m_away_through_the_server() {
     let mut uploaded = 0;
     for (k, accel) in [0.0, 0.0, -6.0].into_iter().enumerate() {
         let t = now + 0.1 * k as f64;
-        for frame in a.engine.transmit(t, fix(la, accel), road.clone()) {
+        for frame in a.engine.transmit(t, fix(la, accel), road) {
             let up = sa.link.upload(frame);
             if !up.is_empty() {
                 uploaded += 1;
