@@ -26,6 +26,9 @@ use roadmesh_core::rsm::VehicleType;
 
 uniffi::setup_scaffolding!();
 
+mod cellular;
+pub use cellular::{CellularLink, Enrolled, LinkEvent, parse_enrol_reply};
+
 /// Errors returned to the app.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Error)]
 pub enum RoadMeshError {

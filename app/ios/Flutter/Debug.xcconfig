@@ -3,3 +3,5 @@
 // Developer CA trust anchor for field tests (debug only). Create Flutter/DevCa.xcconfig with
 // ROADMESH_DEV_CA_ANCHOR = <anchor printed by devca>; it is git-ignored.
 #include? "DevCa.xcconfig"
+// The edge server (docs/SERVER.md), as in Release.xcconfig.
+#include? "Server.xcconfig"

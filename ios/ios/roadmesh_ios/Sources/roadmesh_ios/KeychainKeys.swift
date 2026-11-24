@@ -76,5 +76,37 @@ final class KeychainKeys: HardwareKeys, @unchecked Sendable {
         return sign(tag: tag, message: message) ?? Data()
     }
 
+    static let deviceCertLabel = "com.roadmesh.device.certificate"
+
+    /// Store the device certificate (DER) the server issued for the device key, replacing
+    /// any previous one. The keychain pairs it with the Secure Enclave key as an identity.
+    func storeDeviceCertificate(_ der: Data) throws {
+        guard let cert = SecCertificateCreateWithData(nil, der as CFData) else { throw KeyError.publicKey }
+        SecItemDelete([kSecClass as String: kSecClassCertificate,
+                       kSecAttrLabel as String: Self.deviceCertLabel] as CFDictionary)
+        let status = SecItemAdd([kSecClass as String: kSecClassCertificate,
+                                 kSecValueRef as String: cert,
+                                 kSecAttrLabel as String: Self.deviceCertLabel] as CFDictionary, nil)
+        guard status == errSecSuccess else { throw KeyError.create }
+    }
+
+    /// The device identity (device certificate + Secure Enclave key) for mutual TLS.
+    func deviceIdentity() -> SecIdentity? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassIdentity,
+            kSecAttrLabel as String: Self.deviceCertLabel,
+            kSecReturnRef as String: true,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess, let found = item else { return nil }
+        return (found as! SecIdentity) // swiftlint:disable:this force_cast (kSecClassIdentity)
+    }
+
+    /// Forget the device certificate ("delete my data").
+    func deleteDeviceCertificate() {
+        SecItemDelete([kSecClass as String: kSecClassCertificate,
+                       kSecAttrLabel as String: Self.deviceCertLabel] as CFDictionary)
+    }
+
     enum KeyError: Error { case create, publicKey, sign }
 }

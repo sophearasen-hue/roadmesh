@@ -50,6 +50,15 @@ android {
     buildFeatures { buildConfig = true }
 
     buildTypes {
+        all {
+            // The edge server (docs/SERVER.md); empty values switch the cellular bridge off.
+            fun prop(n: String) = ((project.findProperty(n) as String?) ?: "").replace("\"", "")
+            buildConfigField("String", "SERVER_HOST", "\"${prop("roadmesh.serverHost")}\"")
+            buildConfigField("String", "SERVER_PINS", "\"${prop("roadmesh.serverPins")}\"")
+            buildConfigField("String", "CLOUD_PROJECT", "\"${prop("roadmesh.cloudProject")}\"")
+            // The production pseudonym CA trust anchor (68 hex chars), printed by the server
+            buildConfigField("String", "CA_ANCHOR", "\"${prop("roadmesh.caAnchor")}\"")
+        }
         getByName("debug") {
             // Debug builds only: the public key of a developer CA (scripts/devca), passed as
             // -Proadmesh.devCaAnchor=<68 hex chars>. Release builds trust no test CA.
@@ -77,6 +86,8 @@ kotlin {
 dependencies {
     // UniFFI's Kotlin bindings call the Rust library through JNA
     implementation("net.java.dev.jna:jna:5.17.0@aar")
+    // Play Integrity before certificates are issued (AUDIT S-16)
+    implementation("com.google.android.play:integrity:1.4.0")
     testImplementation("org.jetbrains.kotlin:kotlin-test")
     testImplementation("org.junit.jupiter:junit-jupiter:5.12.2")
 }

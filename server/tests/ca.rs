@@ -54,7 +54,7 @@ impl CaKey for SoftCa {
 /// Test-only: every device is genuine.
 struct AcceptAll;
 impl Attestation for AcceptAll {
-    fn verify(&self, _: &[u8; PUBLIC_KEY_LEN], _: &[u8]) -> bool {
+    fn verify(&self, _: &[u8; PUBLIC_KEY_LEN], _challenge: &[u8], _: &[u8]) -> bool {
         true
     }
 }

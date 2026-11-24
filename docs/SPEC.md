@@ -124,6 +124,8 @@ Phones re-broadcast what they hear, so a warning can travel several hops beyond 
 
 **Cellular bridge.** A phone with 4G uploads its own RSM and any event messages it hears to the regional edge server. The server pushes events to subscribed phones in the same map cells. This joins up mesh islands that cannot hear each other by radio.
 
+*Implementation note (Step 9).* The server uses only events, so phones upload only event messages (their own and those heard); position heartbeats stay on the radio, which saves about 7 MB an hour and means the server never sees positions. Phones subscribe to their geohash-6 cell and the 8 around it. Every frame is verified twice: by the server before it is pushed, and by the receiving phone like any radio frame. Protocol, topics and deployment: docs/SERVER.md.
+
 ## 6. Local Dynamic Map, tracking and prediction
 
 Each phone keeps a Local Dynamic Map (LDM): a small live table of every peer it has heard in the last 2 s, placed on the road map. Every alert and score reads from it.
