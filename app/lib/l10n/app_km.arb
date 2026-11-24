@@ -24,5 +24,217 @@
   "typeTruck": "ឡានដឹកទំនិញ",
   "typeOther": "យានយន្ត",
   "notifTitle": "RoadMesh កំពុងដំណើរការ",
-  "notifText": "កំពុងតាមដានផ្លូវជុំវិញអ្នក"
+  "notifText": "កំពុងតាមដានផ្លូវជុំវិញអ្នក",
+  "pause": "ផ្អាក",
+  "resume": "បន្ត",
+  "networkView": "មើលបណ្ដាញ",
+  "nearbyView": "មើលជិតខ្លួន",
+  "kmh": "គ.ម/ម៉ោង",
+  "connected": "បានភ្ជាប់",
+  "reach": "ចម្ងាយបណ្ដាញ",
+  "score": "ពិន្ទុ",
+  "mySpeed": "ល្បឿនខ្ញុំ",
+  "brake": "ហ្វ្រាំងខ្លាំង",
+  "nearest": "យាននៅជិតបំផុត",
+  "tabDrive": "បើកបរ",
+  "tabPeers": "យានជុំវិញ",
+  "tabBehavior": "ឥរិយាបថ",
+  "tabSettings": "ការកំណត់",
+  "noAlert": "ផ្លូវមានសុវត្ថិភាព — មិនមានគ្រោះថ្នាក់",
+  "alertCross": "{type}កំពុងឆ្លងកាត់ពីខាង{side}របស់អ្នក ក្នុងរយៈពេល {t} វិនាទី",
+  "sideLeft": "ឆ្វេង",
+  "sideRight": "ស្ដាំ",
+  "alertBrake": "មានការហ្វ្រាំងខ្លាំង {d} ម៉ែត្រនៅខាងមុខ",
+  "alertOvertake": "{type}កំពុងវ៉ាជែងអ្នក",
+  "alertBehind": "{type}ល្បឿនលឿនកំពុងមកពីក្រោយ ({v} គ.ម/ម៉ោង)",
+  "alertSpeed": "អ្នកបើកលើសល្បឿនកំណត់ {o} គ.ម/ម៉ោង",
+  "alertCrossSoon": "{type}កំពុងឆ្លងកាត់ពីខាង{side}របស់អ្នក",
+  "@alertCrossSoon": {
+    "x-needs-review": true
+  },
+  "alertPriority": "{type}កំពុងឆ្លងកាត់ — អ្នកមានអាទិភាព",
+  "@alertPriority": {
+    "x-needs-review": true
+  },
+  "alertVehicleAhead": "{type}យឺត ឬឈប់ {d} ម៉ែត្រនៅខាងមុខ",
+  "@alertVehicleAhead": {
+    "x-needs-review": true
+  },
+  "alertOncoming": "{type}មកទល់មុខក្នុងគន្លងរបស់អ្នក",
+  "@alertOncoming": {
+    "x-needs-review": true
+  },
+  "alertNotYielding": "{type}មិនផ្តល់ផ្លូវ",
+  "@alertNotYielding": {
+    "x-needs-review": true
+  },
+  "alertLostContact": "បាត់ទំនាក់ទំនងជាមួយយានដែលអ្នកកំពុងផ្តល់ផ្លូវ",
+  "@alertLostContact": {
+    "x-needs-review": true
+  },
+  "alertHazard": "ចរាចរណ៍ឈប់ {d} ម៉ែត្រនៅខាងមុខ",
+  "@alertHazard": {
+    "x-needs-review": true
+  },
+  "alertPossible": "អាចមានការប៉ះទង្គិចជាមួយ{type} — ទីតាំងមិនច្បាស់",
+  "@alertPossible": {
+    "x-needs-review": true
+  },
+  "alertHazardRelayed": "{text} · {link}",
+  "@alertHazardRelayed": {
+    "x-needs-review": true
+  },
+  "adviceEaseOff": "បន្ថយល្បឿន",
+  "@adviceEaseOff": {
+    "x-needs-review": true
+  },
+  "adviceBrakeGently": "ហ្វ្រាំងស្រាលៗ",
+  "@adviceBrakeGently": {
+    "x-needs-review": true
+  },
+  "adviceBrakeFirmly": "ហ្វ្រាំងឱ្យខ្លាំង",
+  "@adviceBrakeFirmly": {
+    "x-needs-review": true
+  },
+  "adviceBrakeHard": "ហ្វ្រាំងខ្លាំងភ្លាម",
+  "@adviceBrakeHard": {
+    "x-needs-review": true
+  },
+  "direct": "ភ្ជាប់ផ្ទាល់",
+  "viaHops": "បញ្ជូនបន្ត {n} ដង",
+  "hop1": "បញ្ជូនបន្ត ១ ដង",
+  "cellular": "តាមបណ្ដាញទូរស័ព្ទ",
+  "@cellular": {
+    "x-needs-review": true
+  },
+  "riskSafe": "សុវត្ថិភាព",
+  "riskCaution": "ប្រុងប្រយ័ត្ន",
+  "riskRisky": "គ្រោះថ្នាក់",
+  "evSpeeding": "បើកលើសល្បឿន",
+  "evHacc": "បង្កើនល្បឿនខ្លាំង",
+  "evHbrake": "ហ្វ្រាំងខ្លាំង",
+  "evOvertake": "វ៉ាជែង",
+  "evTailgating": "បើកកៀក",
+  "@evTailgating": {
+    "x-needs-review": true
+  },
+  "peersTitle": "យានចំនួន {n} នៅក្នុងបណ្ដាញរបស់អ្នក",
+  "peersSub": "ទទួលដោយផ្ទាល់តាមវិទ្យុ ឬបញ្ជូនបន្តដោយទូរស័ព្ទផ្សេងទៀត",
+  "peersEmpty": "គ្មានយាននៅក្នុងចម្ងាយ។ សូមជ្រើសរើសរបៀបវិទ្យុចម្ងាយឆ្ងាយជាង ឬបង្កើនចំនួនបញ្ជូនបន្តនៅក្នុងការកំណត់។",
+  "dist": "ចម្ងាយ",
+  "speed": "ល្បឿន",
+  "road": "ផ្លូវ",
+  "link": "ការភ្ជាប់",
+  "latency": "ពេលពន្យារ",
+  "accel": "សំទុះ",
+  "back": "‹ ត្រឡប់ក្រោយ",
+  "speedHistory": "ល្បឿនក្នុងរយៈពេល ២ នាទីចុងក្រោយ",
+  "events": "ព្រឹត្តិការណ៍ដែលបានកត់ត្រា",
+  "noEvents": "មិនទាន់មានព្រឹត្តិការណ៍",
+  "myTrip": "ដំណើររបស់ខ្ញុំ",
+  "drivingScore": "ពិន្ទុបើកបរ",
+  "distance": "ចម្ងាយ",
+  "avgSpeed": "ល្បឿនមធ្យម",
+  "maxSpeed": "ល្បឿនខ្ពស់បំផុត",
+  "timeline": "បញ្ជីព្រឹត្តិការណ៍",
+  "fAll": "ទាំងអស់",
+  "fMe": "ខ្ញុំ",
+  "fPeers": "យានផ្សេង",
+  "you": "អ្នក",
+  "networkSummary": "អ្នកបើកបរជុំវិញអ្នក",
+  "riskyPeers": "គ្រោះថ្នាក់ {r} · ប្រុងប្រយ័ត្ន {c} · សុវត្ថិភាព {s}",
+  "language": "ភាសា",
+  "radioMode": "វិទ្យុពីយានមួយទៅយានមួយ",
+  "radioBle": "ប៊្លូធូស LE",
+  "radioBleD": "ទូរស័ព្ទតែប៉ុណ្ណោះ · ប្រហែល ១២០ ម៉ែត្រ ក្នុងមួយជំហាន · ៣០ មិល្លីវិនាទី",
+  "radioWifi": "Wi-Fi Aware / Direct",
+  "radioWifiD": "ទូរស័ព្ទតែប៉ុណ្ណោះ · ប្រហែល ៣០០ ម៉ែត្រ ក្នុងមួយជំហាន · ១០ មិល្លីវិនាទី",
+  "radioLora": "ឧបករណ៍វិទ្យុចម្ងាយឆ្ងាយបន្ថែម",
+  "radioLoraD": "ឧបករណ៍តូច · ប្រហែល ១ គីឡូម៉ែត្រ ក្នុងមួយជំហាន · ១៥០ មិល្លីវិនាទី",
+  "radioSoon": "នឹងមានពេលក្រោយ៖ ទូរស័ព្ទនេះប្រើប៊្លូធូស LE ឥឡូវនេះ។",
+  "@radioSoon": {
+    "x-needs-review": true
+  },
+  "maxHops": "ចំនួនបញ្ជូនបន្តអតិបរមា៖ {n}",
+  "maxHopsD": "ទូរស័ព្ទនីមួយៗផ្សាយបន្តនូវសារដែលវាទទួលបាន ដូច្នេះព័ត៌មានអាចទៅដល់ឆ្ងាយជាងចម្ងាយវិទ្យុតែមួយ។",
+  "privacy": "ឯកជនភាព",
+  "privacyTxt": "ទូរស័ព្ទនីមួយៗផ្សាយលេខសម្គាល់ចៃដន្យ ដែលផ្លាស់ប្ដូររៀងរាល់ ៥ នាទីម្ដង។ មិនចែករំលែកឈ្មោះ លេខទូរស័ព្ទ ឬស្លាកលេខយានយន្តទេ។ ឥរិយាបថរបស់អ្នកបើកបរផ្សេងទៀតត្រូវបានវាយតម្លៃនៅលើទូរស័ព្ទរបស់អ្នកតែប៉ុណ្ណោះ ហើយមិនត្រូវបានផ្ញើចេញជាមួយអត្តសញ្ញាណឡើយ។",
+  "legendMe": "អ្នក",
+  "legendHop": "ការភ្ជាប់បណ្ដាញ",
+  "legendUnc": "មិននៅក្នុងបណ្ដាញ",
+  "ago": "{s} វិនាទីមុន",
+  "unitM": "ម៉ែត្រ",
+  "unitKm": "គ.ម",
+  "msgRate": "១០ សារ/វិនាទី",
+  "meshLine": "យាន {n} · ចម្ងាយ {d}",
+  "demo": "សាកល្បងគ្រោះថ្នាក់",
+  "unknownRoad": "ផ្លូវគ្មានឈ្មោះ",
+  "@unknownRoad": {
+    "x-needs-review": true
+  },
+  "lockedWhileDriving": "អាចប្រើបាន នៅពេលអ្នកបន្ថយល្បឿនក្រោម ១០ គ.ម/ម៉ោង",
+  "@lockedWhileDriving": {
+    "x-needs-review": true
+  },
+  "deleteData": "លុបទិន្នន័យរបស់ខ្ញុំ",
+  "@deleteData": {
+    "x-needs-review": true
+  },
+  "deleteDataD": "លុបដំណើររបស់អ្នក កំណត់ត្រាឥរិយាបថ និងយានទាំងអស់ដែលបានទទួលពីទូរស័ព្ទនេះ។ ទិន្នន័យរបស់អ្នកនៅលើម៉ាស៊ីនមេក៏នឹងត្រូវលុបដែរ នៅពេលភ្ជាប់ម៉ាស៊ីនមេ។",
+  "@deleteDataD": {
+    "x-needs-review": true
+  },
+  "deleteConfirm": "លុបទិន្នន័យ RoadMesh ទាំងអស់នៅលើទូរស័ព្ទនេះ?",
+  "@deleteConfirm": {
+    "x-needs-review": true
+  },
+  "deleteDone": "ទិន្នន័យរបស់អ្នកត្រូវបានលុប។",
+  "@deleteDone": {
+    "x-needs-review": true
+  },
+  "cancel": "បោះបង់",
+  "@cancel": {
+    "x-needs-review": true
+  },
+  "delete": "លុប",
+  "@delete": {
+    "x-needs-review": true
+  },
+  "motoMode": "របៀបម៉ូតូ",
+  "@motoMode": {
+    "x-needs-review": true
+  },
+  "motoModeD": "ការព្រមានតាមសំឡេង និងការញ័រ អេក្រង់អាចបិទបាន។",
+  "@motoModeD": {
+    "x-needs-review": true
+  },
+  "driveStart": "ចាប់ផ្ដើមបើកបរ",
+  "@driveStart": {
+    "x-needs-review": true
+  },
+  "driveStop": "បញ្ឈប់",
+  "@driveStop": {
+    "x-needs-review": true
+  },
+  "waitingGps": "កំពុងរង់ចាំ GPS…",
+  "@waitingGps": {
+    "x-needs-review": true
+  },
+  "debugTools": "ឧបករណ៍សាកល្បង",
+  "@debugTools": {
+    "x-needs-review": true
+  },
+  "demoMode": "ចរាចរណ៍សាកល្បង (សម្រាប់កំណែសាកល្បងប៉ុណ្ណោះ)",
+  "@demoMode": {
+    "x-needs-review": true
+  },
+  "reachedBy": "ទទួលតាមរយៈការបញ្ជូនបន្ត {n} ដង",
+  "overtook": "បានវ៉ាជែងយានផ្សេង",
+  "unitS": "វិ",
+  "hopsLbl": "ជំហាន",
+  "density": "ដង់ស៊ីតេចរាចរណ៍",
+  "dLow": "តិច",
+  "dMed": "មធ្យម",
+  "dHigh": "ច្រើន",
+  "showUnconn": "បង្ហាញយាននៅក្រៅបណ្ដាញ (សម្រាប់ការក្លែងធ្វើប៉ុណ្ណោះ)"
 }

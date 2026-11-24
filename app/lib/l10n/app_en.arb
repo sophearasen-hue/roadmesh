@@ -66,5 +66,608 @@
   "typeTruck": "Truck",
   "typeOther": "Vehicle",
   "notifTitle": "RoadMesh is on",
-  "notifText": "Watching the road around you"
+  "notifText": "Watching the road around you",
+  "pause": "Pause",
+  "@pause": {
+    "description": "From reference/phone-prototype."
+  },
+  "resume": "Resume",
+  "@resume": {
+    "description": "From reference/phone-prototype."
+  },
+  "networkView": "Network view",
+  "@networkView": {
+    "description": "From reference/phone-prototype."
+  },
+  "nearbyView": "Nearby view",
+  "@nearbyView": {
+    "description": "From reference/phone-prototype."
+  },
+  "kmh": "km/h",
+  "@kmh": {
+    "description": "From reference/phone-prototype."
+  },
+  "connected": "Connected",
+  "@connected": {
+    "description": "From reference/phone-prototype."
+  },
+  "reach": "Mesh reach",
+  "@reach": {
+    "description": "From reference/phone-prototype."
+  },
+  "score": "Score",
+  "@score": {
+    "description": "From reference/phone-prototype."
+  },
+  "mySpeed": "My speed",
+  "@mySpeed": {
+    "description": "From reference/phone-prototype."
+  },
+  "brake": "Hard brake",
+  "@brake": {
+    "description": "From reference/phone-prototype."
+  },
+  "nearest": "Nearest vehicles",
+  "@nearest": {
+    "description": "From reference/phone-prototype."
+  },
+  "tabDrive": "Drive",
+  "@tabDrive": {
+    "description": "From reference/phone-prototype."
+  },
+  "tabPeers": "Peers",
+  "@tabPeers": {
+    "description": "From reference/phone-prototype."
+  },
+  "tabBehavior": "Behavior",
+  "@tabBehavior": {
+    "description": "From reference/phone-prototype."
+  },
+  "tabSettings": "Settings",
+  "@tabSettings": {
+    "description": "From reference/phone-prototype."
+  },
+  "noAlert": "All clear — no hazards detected",
+  "@noAlert": {
+    "description": "From reference/phone-prototype."
+  },
+  "alertCross": "{type} crossing from your {side} in {t} s",
+  "@alertCross": {
+    "description": "From reference/phone-prototype.",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      },
+      "side": {
+        "type": "String"
+      },
+      "t": {
+        "type": "String"
+      }
+    }
+  },
+  "sideLeft": "left",
+  "@sideLeft": {
+    "description": "From reference/phone-prototype."
+  },
+  "sideRight": "right",
+  "@sideRight": {
+    "description": "From reference/phone-prototype."
+  },
+  "alertBrake": "Hard braking {d} m ahead",
+  "@alertBrake": {
+    "description": "From reference/phone-prototype.",
+    "placeholders": {
+      "d": {
+        "type": "int"
+      }
+    }
+  },
+  "alertOvertake": "{type} is overtaking you",
+  "@alertOvertake": {
+    "description": "From reference/phone-prototype.",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "alertBehind": "Fast {type} approaching from behind ({v} km/h)",
+  "@alertBehind": {
+    "description": "From reference/phone-prototype.",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      },
+      "v": {
+        "type": "int"
+      }
+    }
+  },
+  "alertSpeed": "You are {o} km/h over the limit",
+  "@alertSpeed": {
+    "description": "From reference/phone-prototype.",
+    "placeholders": {
+      "o": {
+        "type": "int"
+      }
+    }
+  },
+  "alertCrossSoon": "{type} crossing from your {side}",
+  "@alertCrossSoon": {
+    "description": "New in Step 8 (not in the references).",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      },
+      "side": {
+        "type": "String"
+      }
+    }
+  },
+  "alertPriority": "{type} crossing — you have priority",
+  "@alertPriority": {
+    "description": "New in Step 8 (not in the references).",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "alertVehicleAhead": "Slow or stopped {type} {d} m ahead",
+  "@alertVehicleAhead": {
+    "description": "New in Step 8 (not in the references).",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      },
+      "d": {
+        "type": "int"
+      }
+    }
+  },
+  "alertOncoming": "Oncoming {type} in your lane",
+  "@alertOncoming": {
+    "description": "New in Step 8 (not in the references).",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "alertNotYielding": "{type} is not giving way",
+  "@alertNotYielding": {
+    "description": "New in Step 8 (not in the references).",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "alertLostContact": "Lost contact with the vehicle you are giving way to",
+  "@alertLostContact": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "alertHazard": "Stopped traffic {d} m ahead",
+  "@alertHazard": {
+    "description": "New in Step 8 (not in the references).",
+    "placeholders": {
+      "d": {
+        "type": "int"
+      }
+    }
+  },
+  "alertPossible": "Possible conflict with a {type} — position uncertain",
+  "@alertPossible": {
+    "description": "New in Step 8 (not in the references).",
+    "placeholders": {
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "alertHazardRelayed": "{text} · {link}",
+  "@alertHazardRelayed": {
+    "description": "New in Step 8 (not in the references).",
+    "placeholders": {
+      "text": {
+        "type": "String"
+      },
+      "link": {
+        "type": "String"
+      }
+    }
+  },
+  "adviceEaseOff": "Ease off",
+  "@adviceEaseOff": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "adviceBrakeGently": "Brake gently",
+  "@adviceBrakeGently": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "adviceBrakeFirmly": "Brake firmly",
+  "@adviceBrakeFirmly": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "adviceBrakeHard": "Brake hard now",
+  "@adviceBrakeHard": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "direct": "Direct",
+  "@direct": {
+    "description": "From reference/phone-prototype."
+  },
+  "viaHops": "{n} hops",
+  "@viaHops": {
+    "description": "From reference/phone-prototype.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "hop1": "1 hop",
+  "@hop1": {
+    "description": "From reference/phone-prototype."
+  },
+  "cellular": "Cellular",
+  "@cellular": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "riskSafe": "Safe",
+  "@riskSafe": {
+    "description": "From reference/phone-prototype."
+  },
+  "riskCaution": "Caution",
+  "@riskCaution": {
+    "description": "From reference/phone-prototype."
+  },
+  "riskRisky": "Risky",
+  "@riskRisky": {
+    "description": "From reference/phone-prototype."
+  },
+  "evSpeeding": "Speeding",
+  "@evSpeeding": {
+    "description": "From reference/phone-prototype."
+  },
+  "evHacc": "Harsh acceleration",
+  "@evHacc": {
+    "description": "From reference/phone-prototype."
+  },
+  "evHbrake": "Harsh braking",
+  "@evHbrake": {
+    "description": "From reference/phone-prototype."
+  },
+  "evOvertake": "Overtake",
+  "@evOvertake": {
+    "description": "From reference/phone-prototype."
+  },
+  "evTailgating": "Tailgating",
+  "@evTailgating": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "peersTitle": "{n} vehicles in your mesh",
+  "@peersTitle": {
+    "description": "From reference/phone-prototype.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "peersSub": "Seen directly by radio or relayed by other phones",
+  "@peersSub": {
+    "description": "From reference/phone-prototype."
+  },
+  "peersEmpty": "No vehicles in range. Try a longer-range radio mode or more relay hops in Settings.",
+  "@peersEmpty": {
+    "description": "From reference/phone-prototype."
+  },
+  "dist": "Distance",
+  "@dist": {
+    "description": "From reference/phone-prototype."
+  },
+  "speed": "Speed",
+  "@speed": {
+    "description": "From reference/phone-prototype."
+  },
+  "road": "Road",
+  "@road": {
+    "description": "From reference/phone-prototype."
+  },
+  "link": "Link",
+  "@link": {
+    "description": "From reference/phone-prototype."
+  },
+  "latency": "Latency",
+  "@latency": {
+    "description": "From reference/phone-prototype."
+  },
+  "accel": "Acceleration",
+  "@accel": {
+    "description": "From reference/phone-prototype."
+  },
+  "back": "‹ Back",
+  "@back": {
+    "description": "From reference/phone-prototype."
+  },
+  "speedHistory": "Speed, last 2 minutes",
+  "@speedHistory": {
+    "description": "From reference/phone-prototype."
+  },
+  "events": "Recorded events",
+  "@events": {
+    "description": "From reference/phone-prototype."
+  },
+  "noEvents": "No events recorded yet",
+  "@noEvents": {
+    "description": "From reference/phone-prototype."
+  },
+  "myTrip": "My trip",
+  "@myTrip": {
+    "description": "From reference/phone-prototype."
+  },
+  "drivingScore": "Driving score",
+  "@drivingScore": {
+    "description": "From reference/phone-prototype."
+  },
+  "distance": "Distance",
+  "@distance": {
+    "description": "From reference/phone-prototype."
+  },
+  "avgSpeed": "Average speed",
+  "@avgSpeed": {
+    "description": "From reference/phone-prototype."
+  },
+  "maxSpeed": "Top speed",
+  "@maxSpeed": {
+    "description": "From reference/phone-prototype."
+  },
+  "timeline": "Event timeline",
+  "@timeline": {
+    "description": "From reference/phone-prototype."
+  },
+  "fAll": "All",
+  "@fAll": {
+    "description": "From reference/phone-prototype."
+  },
+  "fMe": "Me",
+  "@fMe": {
+    "description": "From reference/phone-prototype."
+  },
+  "fPeers": "Others",
+  "@fPeers": {
+    "description": "From reference/phone-prototype."
+  },
+  "you": "You",
+  "@you": {
+    "description": "From reference/phone-prototype."
+  },
+  "networkSummary": "Drivers around you",
+  "@networkSummary": {
+    "description": "From reference/phone-prototype."
+  },
+  "riskyPeers": "{r} risky · {c} caution · {s} safe",
+  "@riskyPeers": {
+    "description": "From reference/phone-prototype.",
+    "placeholders": {
+      "r": {
+        "type": "int"
+      },
+      "c": {
+        "type": "int"
+      },
+      "s": {
+        "type": "int"
+      }
+    }
+  },
+  "language": "Language",
+  "@language": {
+    "description": "From reference/phone-prototype."
+  },
+  "radioMode": "Peer-to-peer radio",
+  "@radioMode": {
+    "description": "From reference/phone-prototype."
+  },
+  "radioBle": "Bluetooth LE",
+  "@radioBle": {
+    "description": "From reference/phone-prototype."
+  },
+  "radioBleD": "Phone only · ~120 m per hop · 30 ms per hop",
+  "@radioBleD": {
+    "description": "From reference/phone-prototype."
+  },
+  "radioWifi": "Wi-Fi Aware / Direct",
+  "@radioWifi": {
+    "description": "From reference/phone-prototype."
+  },
+  "radioWifiD": "Phone only · ~300 m per hop · 10 ms per hop",
+  "@radioWifiD": {
+    "description": "From reference/phone-prototype."
+  },
+  "radioLora": "Long-range radio add-on",
+  "@radioLora": {
+    "description": "From reference/phone-prototype."
+  },
+  "radioLoraD": "Small dongle · ~1 km per hop · 150 ms per hop",
+  "@radioLoraD": {
+    "description": "From reference/phone-prototype."
+  },
+  "radioSoon": "Coming later: this phone uses Bluetooth LE now.",
+  "@radioSoon": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "maxHops": "Max relay hops: {n}",
+  "@maxHops": {
+    "description": "From reference/phone-prototype.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "maxHopsD": "Each phone re-broadcasts messages it hears, so information travels further than one radio can reach.",
+  "@maxHopsD": {
+    "description": "From reference/phone-prototype."
+  },
+  "privacy": "Privacy",
+  "@privacy": {
+    "description": "From reference/phone-prototype."
+  },
+  "privacyTxt": "Each phone broadcasts a random ID that changes every 5 minutes. No names, phone numbers or plate numbers are shared. Other drivers' behavior is scored on your phone only and never uploaded with an identity.",
+  "@privacyTxt": {
+    "description": "From reference/phone-prototype."
+  },
+  "legendMe": "You",
+  "@legendMe": {
+    "description": "From reference/phone-prototype."
+  },
+  "legendHop": "Mesh link",
+  "@legendHop": {
+    "description": "From reference/phone-prototype."
+  },
+  "legendUnc": "Not in mesh",
+  "@legendUnc": {
+    "description": "From reference/phone-prototype."
+  },
+  "ago": "{s}s ago",
+  "@ago": {
+    "description": "From reference/phone-prototype.",
+    "placeholders": {
+      "s": {
+        "type": "int"
+      }
+    }
+  },
+  "unitM": "m",
+  "@unitM": {
+    "description": "From reference/phone-prototype."
+  },
+  "unitKm": "km",
+  "@unitKm": {
+    "description": "From reference/phone-prototype."
+  },
+  "msgRate": "10 messages/sec",
+  "@msgRate": {
+    "description": "From reference/phone-prototype."
+  },
+  "meshLine": "{n} vehicles · reach {d}",
+  "@meshLine": {
+    "description": "From reference/phone-prototype.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      },
+      "d": {
+        "type": "String"
+      }
+    }
+  },
+  "demo": "Hazard demo",
+  "@demo": {
+    "description": "From reference/phone-prototype."
+  },
+  "unknownRoad": "Unnamed road",
+  "@unknownRoad": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "lockedWhileDriving": "Available when you slow below 10 km/h",
+  "@lockedWhileDriving": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "deleteData": "Delete my data",
+  "@deleteData": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "deleteDataD": "Removes your trip, your behaviour record and every vehicle heard from this phone. Your account data on the server is removed too once the server is connected.",
+  "@deleteDataD": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "deleteConfirm": "Delete all RoadMesh data on this phone?",
+  "@deleteConfirm": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "deleteDone": "Your data was deleted.",
+  "@deleteDone": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "cancel": "Cancel",
+  "@cancel": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "delete": "Delete",
+  "@delete": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "motoMode": "Motorbike mode",
+  "@motoMode": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "motoModeD": "Alerts by sound and vibration; the screen may stay off.",
+  "@motoModeD": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "driveStart": "Start driving",
+  "@driveStart": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "driveStop": "Stop",
+  "@driveStop": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "waitingGps": "Waiting for GPS…",
+  "@waitingGps": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "debugTools": "Debug tools",
+  "@debugTools": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "demoMode": "Demo traffic (debug build only)",
+  "@demoMode": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "reachedBy": "Reached via {n} relays",
+  "@reachedBy": {
+    "description": "From reference/phone-prototype.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "overtook": "passed another vehicle",
+  "@overtook": {
+    "description": "From reference/phone-prototype."
+  },
+  "unitS": "s",
+  "@unitS": {
+    "description": "From reference/phone-prototype."
+  },
+  "hopsLbl": "hops",
+  "@hopsLbl": {
+    "description": "From reference/phone-prototype."
+  },
+  "density": "Traffic density",
+  "@density": {
+    "description": "From reference/phone-prototype."
+  },
+  "dLow": "Low",
+  "@dLow": {
+    "description": "From reference/phone-prototype."
+  },
+  "dMed": "Medium",
+  "@dMed": {
+    "description": "From reference/phone-prototype."
+  },
+  "dHigh": "High",
+  "@dHigh": {
+    "description": "From reference/phone-prototype."
+  },
+  "showUnconn": "Show vehicles outside the mesh (simulation only)",
+  "@showUnconn": {
+    "description": "From reference/phone-prototype."
+  }
 }

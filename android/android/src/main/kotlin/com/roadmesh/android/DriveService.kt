@@ -19,6 +19,8 @@ import com.roadmesh.core.DecisionInfo
 import com.roadmesh.core.OwnFix
 import com.roadmesh.core.PeerInfo
 import com.roadmesh.core.RoadInfo
+import com.roadmesh.core.TripInfo
+import com.roadmesh.core.EventInfo
 import com.roadmesh.core.RxResult
 import com.roadmesh.core.SafetyEngine
 import kotlin.math.cos
@@ -124,7 +126,10 @@ class DriveService : Service() {
                     radio.pruneLinks()
                 }
                 if (ticks % 600 == 0L) fieldLog.everyMinute(battery())
-                if (ticks % 2 == 0L) listeners.forEach { it(d, peers) }
+                if (ticks % 2 == 0L && listeners.isNotEmpty()) {
+                    val u = Update(d, peers, fix, road, e.trip(), e.events(t, 40u))
+                    listeners.forEach { it(u) }
+                }
             }
             handler.postDelayed(this, 100)
         }
@@ -171,6 +176,12 @@ class DriveService : Service() {
         "running" to (engine != null),
     )
 
+    /** "Delete my data" on this phone (trip, behaviour, peers heard, field log). */
+    fun deleteMyData() {
+        engine?.deleteMyData()
+        fieldLog.clear()
+    }
+
     fun createCertificateRequest(): String = enrolment.createRequest().absolutePath
 
     fun importCertificates(): Int {
@@ -195,7 +206,17 @@ class DriveService : Service() {
         @Volatile
         var instance: DriveService? = null
 
-        /** UI listeners (5 Hz): decision and peers. */
-        val listeners = java.util.concurrent.CopyOnWriteArrayList<(DecisionInfo, List<PeerInfo>) -> Unit>()
+        /** UI listeners (5 Hz). */
+        val listeners = java.util.concurrent.CopyOnWriteArrayList<(Update) -> Unit>()
     }
 }
+
+/** One UI update: what the Rust engine decided and what it knows. The UI decides nothing. */
+data class Update(
+    val decision: DecisionInfo,
+    val peers: List<PeerInfo>,
+    val fix: OwnFix,
+    val road: RoadInfo,
+    val trip: TripInfo,
+    val events: List<EventInfo>,
+)

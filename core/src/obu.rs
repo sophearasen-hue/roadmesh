@@ -446,6 +446,20 @@ impl Obu {
         &self.behavior
     }
 
+    /// "Delete my data": forget the trip, every behaviour record and every peer heard.
+    pub fn forget_all(&mut self) {
+        self.behavior = BehaviorMonitor::new();
+        self.ldm = Ldm::new();
+        self.tracker = Tracker::new();
+        // blocked senders stay blocked (a security decision, not personal data)
+        self.last_frame.clear();
+        self.evidence.clear();
+        self.sample_count.clear();
+        self.pending.clear();
+        self.relayed.clear();
+        self.outbox.clear();
+    }
+
     /// Frames queued for forwarding (cleared by [`Obu::transmit`]).
     pub fn pending_relays(&self) -> &[Frame] {
         &self.outbox

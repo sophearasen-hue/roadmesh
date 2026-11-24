@@ -1,66 +1,99 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'l10n/app_localizations.dart';
-import 'radio_test.dart';
+import 'radio.dart';
+import 'ui/controller.dart';
+import 'ui/demo.dart';
+import 'ui/home.dart';
+import 'ui/style.dart';
 
-void main() {
-  runApp(const RoadMeshApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
+  final c = DriveController(
+    prefs: prefs,
+    onDeleteData: RoadMeshRadio.deleteMyData,
+  );
+  runApp(RoadMeshApp(controller: c, live: true));
 }
 
-/// Root widget. Placeholder screen until BUILD_PLAN Step 8.
-///
-/// All user-facing text comes from `lib/l10n/app_*.arb` (CLAUDE.md "Localisation").
-class RoadMeshApp extends StatelessWidget {
-  const RoadMeshApp({super.key, this.locale});
+/// Root widget. All user-facing text comes from `lib/l10n/app_*.arb`.
+class RoadMeshApp extends StatefulWidget {
+  /// `live` connects to the drive service; tests pass a controller and feed it.
+  const RoadMeshApp({super.key, required this.controller, this.live = false});
 
-  /// Forced locale for tests and for the in-app language switch; null = device locale.
-  final Locale? locale;
+  /// State.
+  final DriveController controller;
+
+  /// Listen to the native drive service.
+  final bool live;
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
+  State<RoadMeshApp> createState() => _RoadMeshAppState();
+}
+
+class _RoadMeshAppState extends State<RoadMeshApp> {
+  bool _driving = false;
+  DemoTraffic? _demo;
+
+  DriveController get c => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.live) c.attach(RoadMeshRadio.updates);
+  }
+
+  Future<void> _toggleDrive(BuildContext context) async {
+    final l = AppLocalizations.of(context);
+    if (_driving) {
+      await RoadMeshRadio.stop();
+      setState(() => _driving = false);
+      return;
+    }
+    if (!await RoadMeshRadio.requestPermissions()) {
+      // debug builds fall back to demo traffic so the screens can be tried (P-11)
+      if (kDebugMode) _startDemo();
+      return;
+    }
+    await RoadMeshRadio.start(
+      notificationTitle: l.notifTitle,
+      notificationText: l.notifText,
+      vehicleType: c.motorbikeMode ? 1 : 0,
+    );
+    setState(() => _driving = true);
+  }
+
+  void _startDemo() {
+    if (!kDebugMode) return;
+    final d = DemoTraffic();
+    _demo = d;
+    c.demo = d;
+    c.attach(d.updates());
+    setState(() => _driving = true);
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: c,
+    builder: (context, _) => MaterialApp(
+      debugShowCheckedModeBanner: false,
       onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
-      locale: locale,
+      theme: roadMeshTheme(),
+      locale: c.locale,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
-      home: const _PlaceholderHome(),
-    );
-  }
-}
-
-class _PlaceholderHome extends StatelessWidget {
-  const _PlaceholderHome();
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              l10n.appTitle,
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(l10n.tagline, textAlign: TextAlign.center),
-            // field-test tools exist only in debug builds (BUILD_PLAN Step 8 rule)
-            if (kDebugMode) ...[
-              const SizedBox(height: 24),
-              OutlinedButton(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const RadioTestScreen(),
-                  ),
-                ),
-                child: Text(l10n.radioTest),
-              ),
-            ],
-          ],
+      home: Builder(
+        builder: (context) => HomeScreen(
+          c: c,
+          driving: _driving,
+          onDrive: widget.live && _demo == null
+              ? () => _toggleDrive(context)
+              : null,
         ),
       ),
-    );
-  }
+    ),
+  );
 }

@@ -26,6 +26,16 @@ public final class FieldLog {
 
     private func band(_ d: Double) -> String { Self.bands.first { d < $0.1 }?.0 ?? "250+" }
 
+    /// Forget everything ("Delete my data").
+    public func clear() {
+        lock.lock()
+        defer { lock.unlock() }
+        reset()
+        thisSecond = [:]
+        rows = []
+        minute = 0
+    }
+
     /// A frame from `pseudonymHex` was accepted with signal strength `rssi` (dBm).
     public func onAccepted(pseudonymHex: String, rssi: Int) {
         lock.lock(); defer { lock.unlock() }

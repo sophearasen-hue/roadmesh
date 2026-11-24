@@ -44,4 +44,12 @@ final class RoadMeshKitTests: XCTestCase {
         XCTAssertEqual(lines[1], "0,87,100-150,540,600,90.0,-70")
         XCTAssertFalse(log.csv().contains("deadbeef"))
     }
+
+    func testFieldLogClearForgetsEverything() {
+        let log = FieldLog()
+        log.everySecond(["deadbeef": 20])
+        log.everyMinute(batteryPct: 50)
+        log.clear()
+        XCTAssertEqual(log.csv().split(separator: "\n").count, 1)
+    }
 }

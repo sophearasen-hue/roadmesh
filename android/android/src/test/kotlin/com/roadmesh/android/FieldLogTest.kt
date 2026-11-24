@@ -25,4 +25,13 @@ class FieldLogTest {
         log.everyMinute(50)
         assertEquals("0,50,none,0,0,,", log.csv().trim().lines()[1])
     }
+
+    @Test
+    fun clearForgetsEverything() {
+        val log = FieldLog()
+        log.everySecond(mapOf("deadbeef" to 20.0))
+        log.everyMinute(50)
+        log.clear()
+        assertEquals(1, log.csv().trim().lines().size)
+    }
 }

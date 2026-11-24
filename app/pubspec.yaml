@@ -13,6 +13,7 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   intl: any
+  shared_preferences: ^2.5.3
   roadmesh_android:
     path: ../android
   roadmesh_ios:
@@ -26,3 +27,16 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   generate: true
+  # Khmer and Latin in one family, bundled (never loaded from the network). OFL licence
+  # in assets/fonts/OFL-KantumruyPro.txt. Static instances of the variable font.
+  fonts:
+    - family: Kantumruy Pro
+      fonts:
+        - asset: assets/fonts/KantumruyPro-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/KantumruyPro-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/KantumruyPro-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/KantumruyPro-Bold.ttf
+          weight: 700
