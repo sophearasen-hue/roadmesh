@@ -1,0 +1,6 @@
+[bindings.kotlin]
+package_name = "com.roadmesh.core"
+cdylib_name = "roadmesh_ffi"
+
+[bindings.swift]
+module_name = "RoadMeshCore"

@@ -12,7 +12,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use roadmesh_core::config::{Config, Security};
 use roadmesh_core::pki::{
-    self, AuthEnvelope, CertDigest, Certificate, DOMAIN_ISSUE, MisbehaviourReport, PUBLIC_KEY_LEN,
+    self, AuthEnvelope, CertDigest, Certificate, MisbehaviourReport, PUBLIC_KEY_LEN,
     RevocationList, SIG_LEN,
 };
 
@@ -71,14 +71,20 @@ pub struct IssueRequest {
 impl IssueRequest {
     /// What the device key signs.
     pub fn to_be_signed(&self) -> Vec<u8> {
-        let mut b = DOMAIN_ISSUE.to_vec();
-        b.extend_from_slice(&self.device_key);
-        b.extend_from_slice(&self.requested_at.to_be_bytes());
-        b.extend_from_slice(&(self.pseudonym_keys.len() as u32).to_be_bytes());
-        for k in &self.pseudonym_keys {
-            b.extend_from_slice(k);
-        }
-        b
+        pki::issue_tbs(&self.device_key, self.requested_at, &self.pseudonym_keys)
+    }
+
+    /// Parse a request received from a phone (untrusted bytes, wire format of
+    /// [`pki::IssueRequestWire`]).
+    pub fn decode(b: &[u8]) -> Result<Self, IssueError> {
+        let w = pki::IssueRequestWire::decode(b).map_err(|_| IssueError::BadRequest)?;
+        Ok(Self {
+            device_key: w.device_key,
+            attestation: w.attestation,
+            pseudonym_keys: w.pseudonym_keys,
+            requested_at: w.requested_at,
+            signature: w.signature,
+        })
     }
 }
 

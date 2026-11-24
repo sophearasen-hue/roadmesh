@@ -374,6 +374,7 @@ pub struct PseudonymSigner<K> {
     current: Option<CertDigest>,
     rotated_at: f64,
     last_full: f64,
+    rotation_allowed: bool,
 }
 
 impl<K: KeyStore> PseudonymSigner<K> {
@@ -384,6 +385,7 @@ impl<K: KeyStore> PseudonymSigner<K> {
             keys,
             sec: sec.clone(),
             current: None,
+            rotation_allowed: true,
             rotated_at: f64::NEG_INFINITY,
             last_full: f64::NEG_INFINITY,
         };
@@ -428,13 +430,38 @@ impl<K: KeyStore> PseudonymSigner<K> {
         valid.get((slot % valid.len() as u64) as usize).map(|c| **c)
     }
 
+    /// AUDIT S-13: whether switching pseudonym is allowed now (the platform sets it: the
+    /// vehicle is stopped or at a junction). While not allowed, the pseudonym in use is kept,
+    /// for at most `rotation_max_delay_s` beyond its scheduled end.
+    pub fn set_rotation_allowed(&mut self, allowed: bool) {
+        self.rotation_allowed = allowed;
+    }
+
+    /// The certificate actually used at `now`: the scheduled one, unless the switch must wait.
+    pub fn active_certificate(&self, now: f64) -> Option<Certificate> {
+        let scheduled = self.certificate_at(now)?;
+        if let Some(d) = self.current
+            && d != scheduled.digest()
+            && !self.rotation_allowed
+            && let Some(cur) = self
+                .certs
+                .iter()
+                .find(|c| c.digest() == d && c.valid_at(now, 0.0))
+            && now - self.rotated_at
+                < self.sec.pseudonym_rotate_s + self.sec.rotation_max_delay_s - 1e-9
+        {
+            return Some(*cur);
+        }
+        Some(scheduled)
+    }
+
     /// Sign `payload` (already domain-prefixed) with the current pseudonym key.
     pub fn sign_with_current(
         &mut self,
         now: f64,
         payload: &[u8],
     ) -> Option<(Certificate, [u8; SIG_LEN])> {
-        let cert = self.certificate_at(now)?;
+        let cert = self.active_certificate(now)?;
         let sig = self.keys.sign(&cert.digest(), payload)?;
         Some((cert, sig))
     }
@@ -442,7 +469,7 @@ impl<K: KeyStore> PseudonymSigner<K> {
 
 impl<K: KeyStore> Signer for PseudonymSigner<K> {
     fn current_temp_id(&mut self, now: f64) -> Option<TempId> {
-        let cert = self.certificate_at(now)?;
+        let cert = self.active_certificate(now)?;
         let d = cert.digest();
         if self.current != Some(d) {
             self.current = Some(d);
@@ -452,7 +479,7 @@ impl<K: KeyStore> Signer for PseudonymSigner<K> {
     }
 
     fn sign(&mut self, now: f64, is_event: bool, body: &[u8; BODY_LEN]) -> Option<Vec<u8>> {
-        let cert = self.certificate_at(now)?;
+        let cert = self.active_certificate(now)?;
         let d = cert.digest();
         if body_temp_id(body) != temp_id_of(&d) {
             return None; // never sign a pseudonym that is not ours
@@ -865,7 +892,7 @@ impl MisbehaviourReport {
         reason: ReportReason,
         evidence: Vec<Frame>,
     ) -> Option<Self> {
-        let reporter = signer.certificate_at(now)?;
+        let reporter = signer.active_certificate(now)?;
         let observed_at = now.max(0.0).min(f64::from(u32::MAX)) as u32;
         let body = Self::body(reason, observed_at, &evidence, &reporter)?;
         let payload = [DOMAIN_REPORT.as_slice(), &body].concat();
@@ -972,6 +999,111 @@ pub fn evidence_shows(
         ldm.update(m, m.t, 0);
     }
     Ok(None)
+}
+
+// ---------------------------------------------------------------- issuance messages
+
+const ISSUE_VERSION: u8 = 1;
+
+/// The bytes a phone's device key signs to request pseudonym certificates (SPEC §10).
+pub fn issue_tbs(
+    device_key: &[u8; PUBLIC_KEY_LEN],
+    requested_at: u32,
+    pseudonym_keys: &[[u8; PUBLIC_KEY_LEN]],
+) -> Vec<u8> {
+    let mut b = DOMAIN_ISSUE.to_vec();
+    b.extend_from_slice(device_key);
+    b.extend_from_slice(&requested_at.to_be_bytes());
+    b.extend_from_slice(&(pseudonym_keys.len() as u32).to_be_bytes());
+    for k in pseudonym_keys {
+        b.extend_from_slice(k);
+    }
+    b
+}
+
+/// A certificate request on the wire:
+/// `[version:1][device_key:33][requested_at:4][n:1][key:33]*n[attestation_len:2][attestation][signature:64]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IssueRequestWire {
+    /// The install's device public key.
+    pub device_key: [u8; PUBLIC_KEY_LEN],
+    /// When the phone made the request (Unix s).
+    pub requested_at: u32,
+    /// One public key per requested certificate.
+    pub pseudonym_keys: Vec<[u8; PUBLIC_KEY_LEN]>,
+    /// App Attest / Play Integrity evidence.
+    pub attestation: Vec<u8>,
+    /// Device-key signature over [`issue_tbs`].
+    pub signature: [u8; SIG_LEN],
+}
+
+impl IssueRequestWire {
+    /// Encode. `None` if more than 255 keys or attestation over 65 535 bytes.
+    pub fn encode(&self) -> Option<Vec<u8>> {
+        let mut b = vec![ISSUE_VERSION];
+        b.extend_from_slice(&self.device_key);
+        b.extend_from_slice(&self.requested_at.to_be_bytes());
+        b.push(u8::try_from(self.pseudonym_keys.len()).ok()?);
+        for k in &self.pseudonym_keys {
+            b.extend_from_slice(k);
+        }
+        b.extend_from_slice(&u16::try_from(self.attestation.len()).ok()?.to_be_bytes());
+        b.extend_from_slice(&self.attestation);
+        b.extend_from_slice(&self.signature);
+        Some(b)
+    }
+
+    /// Parse untrusted bytes. Does not check the signature.
+    pub fn decode(b: &[u8]) -> Result<Self, PkiError> {
+        let mut i = 0usize;
+        let take = |i: &mut usize, n: usize| -> Result<&[u8], PkiError> {
+            let end = i.checked_add(n).ok_or(PkiError::Length)?;
+            let s = b.get(*i..end).ok_or(PkiError::Length)?;
+            *i = end;
+            Ok(s)
+        };
+        if take(&mut i, 1)?[0] != ISSUE_VERSION {
+            return Err(PkiError::Version);
+        }
+        let mut device_key = [0u8; PUBLIC_KEY_LEN];
+        device_key.copy_from_slice(take(&mut i, PUBLIC_KEY_LEN)?);
+        let t = take(&mut i, 4)?;
+        let requested_at = u32::from_be_bytes([t[0], t[1], t[2], t[3]]);
+        let n = usize::from(take(&mut i, 1)?[0]);
+        let mut pseudonym_keys = Vec::with_capacity(n);
+        for _ in 0..n {
+            let mut k = [0u8; PUBLIC_KEY_LEN];
+            k.copy_from_slice(take(&mut i, PUBLIC_KEY_LEN)?);
+            pseudonym_keys.push(k);
+        }
+        let l = take(&mut i, 2)?;
+        let attestation = take(&mut i, usize::from(u16::from_be_bytes([l[0], l[1]])))?.to_vec();
+        let mut signature = [0u8; SIG_LEN];
+        signature.copy_from_slice(take(&mut i, SIG_LEN)?);
+        if i != b.len() {
+            return Err(PkiError::Length);
+        }
+        Ok(Self {
+            device_key,
+            requested_at,
+            pseudonym_keys,
+            attestation,
+            signature,
+        })
+    }
+}
+
+/// Certificates on the wire: back to back, 107 bytes each.
+pub fn encode_certificates(certs: &[Certificate]) -> Vec<u8> {
+    certs.iter().flat_map(|c| c.encode()).collect()
+}
+
+/// Parse a certificate batch (untrusted bytes; CA signatures checked separately).
+pub fn decode_certificates(b: &[u8]) -> Result<Vec<Certificate>, PkiError> {
+    if !b.len().is_multiple_of(CERT_LEN) {
+        return Err(PkiError::Length);
+    }
+    b.chunks_exact(CERT_LEN).map(Certificate::decode).collect()
 }
 
 #[cfg(test)]
@@ -1342,6 +1474,54 @@ mod tests {
         // the first messages after a switch carry the full certificate
         let (_, auth) = signed(&mut dev, now + 300.5, 7);
         assert_eq!(auth.len(), AUTH_FULL_LEN);
+    }
+
+    #[test]
+    fn issue_request_and_certificate_batch_round_trip() {
+        let r = IssueRequestWire {
+            device_key: [2; PUBLIC_KEY_LEN],
+            requested_at: T0,
+            pseudonym_keys: vec![[3; PUBLIC_KEY_LEN], [2; PUBLIC_KEY_LEN]],
+            attestation: b"att".to_vec(),
+            signature: [9; SIG_LEN],
+        };
+        let b = r.encode().unwrap_or_else(|| panic!("encode"));
+        assert_eq!(IssueRequestWire::decode(&b), Ok(r));
+        assert!(IssueRequestWire::decode(&b[..b.len() - 1]).is_err());
+        let ca = TestCa::new(1);
+        let certs = vec![ca.issue(&SigningKey::generate(), T0, T0 + 1); 2];
+        assert_eq!(decode_certificates(&encode_certificates(&certs)), Ok(certs));
+        assert_eq!(decode_certificates(&[0; 10]), Err(PkiError::Length));
+    }
+
+    #[test]
+    fn rotation_waits_for_a_stop_or_junction_but_not_forever() {
+        // AUDIT S-13
+        let ca = TestCa::new(1);
+        let mut dev = device(&ca, 3);
+        let now = now0();
+        dev.set_rotation_allowed(true);
+        let first = dev.current_temp_id(now);
+        dev.set_rotation_allowed(false); // driving between junctions
+        assert_eq!(
+            dev.current_temp_id(now + 310.0),
+            first,
+            "kept while driving"
+        );
+        let (b, a) = signed(&mut dev, now + 310.0, 2);
+        assert_eq!(body_temp_id(&b), first.unwrap_or([0; 4]));
+        assert!(verifier(&ca).verify(now + 310.0, &b, &a).is_ok());
+        assert_ne!(
+            dev.current_temp_id(now + 601.0),
+            first,
+            "forced after the maximum delay"
+        );
+        let mut dev2 = device(&ca, 3);
+        let f2 = dev2.current_temp_id(now);
+        dev2.set_rotation_allowed(false);
+        let _ = dev2.current_temp_id(now + 310.0);
+        dev2.set_rotation_allowed(true); // stopped at a junction
+        assert_ne!(dev2.current_temp_id(now + 311.0), f2);
     }
 
     #[test]

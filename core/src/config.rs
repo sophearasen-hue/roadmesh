@@ -286,6 +286,9 @@ pub struct Config {
 pub struct Security {
     /// A phone switches pseudonym (and certificate) this often (s). SPEC §3.
     pub pseudonym_rotate_s: f64,
+    /// AUDIT S-13: the switch waits until the vehicle is stopped or at a junction (where a
+    /// listener cannot follow it by continuity), but never longer than this (s).
+    pub rotation_max_delay_s: f64,
     /// A message carries the full certificate at least this often (s); other
     /// messages carry only its 8-byte digest (SPEC §10, user decision Step 3).
     pub full_cert_interval_s: f64,
@@ -324,6 +327,7 @@ impl Security {
     pub fn v0() -> Self {
         Self {
             pseudonym_rotate_s: 300.0,
+            rotation_max_delay_s: 300.0,
             full_cert_interval_s: 0.3, // every 3rd message at 10 Hz (user decision, Step 4)
             full_cert_after_rotation_s: 2.0,
             cert_validity_s: 7 * 24 * 3600,

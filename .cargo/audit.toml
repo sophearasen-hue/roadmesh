@@ -1,0 +1,9 @@
+# cargo-audit configuration. Every exception needs a reason and an owner decision.
+[advisories]
+ignore = [
+    # basic-toml is unmaintained (informational, not a vulnerability). It is used only by
+    # UniFFI's binding generator (ffi/uniffi-bindgen), a build-time tool that reads our own
+    # uniffi.toml; it is not linked into the app (roadmesh-ffi builds UniFFI without default
+    # features). Revisit when UniFFI replaces it. Step 5, 2026-11-24.
+    "RUSTSEC-2026-0374",
+]

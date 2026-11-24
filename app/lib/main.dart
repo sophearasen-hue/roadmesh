@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'l10n/app_localizations.dart';
+import 'radio_test.dart';
 
 void main() {
   runApp(const RoadMeshApp());
@@ -38,9 +40,24 @@ class _PlaceholderHome extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(l10n.appTitle, style: Theme.of(context).textTheme.headlineMedium),
+            Text(
+              l10n.appTitle,
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
             const SizedBox(height: 8),
             Text(l10n.tagline, textAlign: TextAlign.center),
+            // field-test tools exist only in debug builds (BUILD_PLAN Step 8 rule)
+            if (kDebugMode) ...[
+              const SizedBox(height: 24),
+              OutlinedButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const RadioTestScreen(),
+                  ),
+                ),
+                child: Text(l10n.radioTest),
+              ),
+            ],
           ],
         ),
       ),
