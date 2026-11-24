@@ -267,6 +267,15 @@ class RoadMeshRadio {
   static Future<int?> importCertificates() =>
       _methods.invokeMethod<int>('importCertificates');
 
+  /// Play the alert tone for "warning" or "danger" (native sound; respects the ringer).
+  static Future<void> alertTone(String level) async {
+    try {
+      await _methods.invokeMethod('alertTone', {'level': level});
+    } on MissingPluginException {
+      // tests
+    }
+  }
+
   /// "Delete my data" on this phone.
   static Future<void> deleteMyData() => _methods.invokeMethod('deleteMyData');
 

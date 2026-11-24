@@ -45,10 +45,22 @@ class DriveController extends ChangeNotifier {
     final lang = prefs?.getString(_kLang);
     if (lang == 'en' || lang == 'km') locale = Locale(lang!);
     motorbikeMode = prefs?.getBool(_kMoto) ?? false;
+    muted = prefs?.getBool(_kMuted) ?? false;
   }
+
+  /// Alert sounds muted (from Settings or the CarPlay Mute button).
+  bool muted = false;
+
+  /// Plays the alert tone for a level ("warning" or "danger"); set by the app to the
+  /// native sound player. The engine chose the alert; this only sounds it.
+  void Function(String level)? onAlertTone;
+
+  /// Level of the alert last sounded, so a tone plays once per escalation.
+  String _sounded = 'ok';
 
   static const _kLang = 'language';
   static const _kMoto = 'motorbikeMode';
+  static const _kMuted = 'muted';
 
   /// Persistent settings (null in some tests).
   final SharedPreferences? prefs;
@@ -103,6 +115,7 @@ class DriveController extends ChangeNotifier {
   /// Apply one update.
   void push(RadioUpdate u) {
     last = u;
+    _sound(u);
     if (_n++ % updatesPerSecond == 0) {
       _add(ownHistory, (u.own.speed * 3.6).round());
       final ids = <String>{};
@@ -118,6 +131,27 @@ class DriveController extends ChangeNotifier {
       selected = null;
     }
     notifyListeners();
+  }
+
+  void _sound(RadioUpdate u) {
+    var level = 'ok';
+    for (final a in u.alerts) {
+      if (a.level == 'danger') {
+        level = 'danger';
+        break;
+      }
+      if (a.level == 'warning') level = 'warning';
+    }
+    final rank = {'ok': 0, 'warning': 1, 'danger': 2};
+    if (rank[level]! > rank[_sounded]! && !muted) onAlertTone?.call(level);
+    _sounded = level;
+  }
+
+  /// Mute or unmute alert sounds, remembered.
+  Future<void> setMuted(bool on) async {
+    muted = on;
+    notifyListeners();
+    await prefs?.setBool(_kMuted, on);
   }
 
   static void _add(List<int> h, int v) {

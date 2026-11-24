@@ -669,5 +669,62 @@
   "showUnconn": "Show vehicles outside the mesh (simulation only)",
   "@showUnconn": {
     "description": "From reference/phone-prototype."
+  },
+  "carplaySpeed": "{speed} km/h · limit {limit}",
+  "@carplaySpeed": {
+    "description": "New in Step 8 (not in the references).",
+    "placeholders": {
+      "speed": {
+        "type": "int"
+      },
+      "limit": {
+        "type": "int"
+      }
+    }
+  },
+  "carplaySpeedNoLimit": "{speed} km/h",
+  "@carplaySpeedNoLimit": {
+    "description": "New in Step 8 (not in the references).",
+    "placeholders": {
+      "speed": {
+        "type": "int"
+      }
+    }
+  },
+  "carplayMute": "Mute",
+  "@carplayMute": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "carplayUnmute": "Unmute",
+  "@carplayUnmute": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "carplayMuted": "Alerts muted",
+  "@carplayMuted": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "carplayNoVehicles": "No vehicles nearby",
+  "@carplayNoVehicles": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "carplayRow": "{speed} km/h · {distance}",
+  "@carplayRow": {
+    "description": "New in Step 8 (not in the references).",
+    "placeholders": {
+      "speed": {
+        "type": "int"
+      },
+      "distance": {
+        "type": "String"
+      }
+    }
+  },
+  "alertSound": "Alert sound",
+  "@alertSound": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "alertSoundD": "A tone for Warning, a chime for Danger. Mute also from CarPlay.",
+  "@alertSoundD": {
+    "description": "New in Step 8 (not in the references)."
   }
 }

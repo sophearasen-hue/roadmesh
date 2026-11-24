@@ -72,4 +72,15 @@ final class RoadMeshKitTests: XCTestCase {
         XCTAssertNil(Pinning.parse("\(one),not-base64"))
         XCTAssertNil(Pinning.parse(""))
     }
+
+    func testCarPlayContentParsesAndCapsRows() {
+        let rows: [[String: Any]] = (0..<8).map { ["text": "Car \($0)", "detail": "30 km/h · \($0)0 m", "band": "safe"] }
+        let m: [String: Any] = ["title": "RoadMesh", "alert": "All clear", "alertLevel": "bogus", "speed": "48 km/h · limit 40",
+                                "overLimit": true, "nearestTitle": "Nearest vehicles", "rows": rows, "muted": false,
+                                "muteLabel": "Mute", "mutedNote": "Alerts muted"]
+        let c = CarPlayContent(m)
+        XCTAssertEqual(c?.rows.count, 5)
+        XCTAssertEqual(c?.alertLevel, "ok")
+        XCTAssertNil(CarPlayContent(["title": "x"]))
+    }
 }
