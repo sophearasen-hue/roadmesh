@@ -16,6 +16,7 @@ pub mod geo;
 pub mod geometry;
 pub mod ldm;
 pub mod map;
+pub mod mqtt;
 pub mod obu;
 pub mod pki;
 pub mod prediction;
