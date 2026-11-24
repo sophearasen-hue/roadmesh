@@ -8,7 +8,7 @@ Steps that run before every release, not on every pull request. Each one must pa
 
    ```bash
    cd fuzz
-   for t in rsm_frame receive_pipeline pki_parsers; do
+   for t in rsm_frame receive_pipeline pki_parsers fragments; do
      cargo +nightly-2026-11-01 fuzz run -O "$t" -- -max_total_time=86400
    done
    ```

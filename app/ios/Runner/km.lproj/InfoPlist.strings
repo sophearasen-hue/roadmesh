@@ -1,0 +1,4 @@
+/* Permission texts shown by iOS (Khmer). x-needs-review: translated in Step 6, review by a native speaker. */
+"NSBluetoothAlwaysUsageDescription" = "RoadMesh ប្រើ Bluetooth ដើម្បីផ្លាស់ប្ដូរសារសុវត្ថិភាពជាមួយយានយន្តនៅជិត ដើម្បីព្រមានអ្នកអំពីការប៉ះទង្គិច។";
+"NSLocationWhenInUseUsageDescription" = "RoadMesh ប្រើទីតាំងរបស់អ្នក ដើម្បីទស្សន៍ទាយការប៉ះទង្គិចជាមួយយានយន្តនៅជិត។ ទីតាំងត្រូវបានចែករំលែកតែក្រោមឈ្មោះក្លែងក្លាយដែលផ្លាស់ប្ដូរជានិច្ចប៉ុណ្ណោះ។";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "RoadMesh បន្តព្រមានអ្នក ពេលអេក្រង់បិទ ក្នុងអំឡុងពេលបើកបរ។";

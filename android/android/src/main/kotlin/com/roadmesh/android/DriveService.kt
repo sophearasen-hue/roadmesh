@@ -119,7 +119,10 @@ class DriveService : Service() {
                 val d = e.decide(t, fix, road)
                 val peers = e.peers(t, fix)
                 ticks++
-                if (ticks % 10 == 0L) fieldLog.everySecond(peers.associate { Crypto.hex(it.pseudonym) to it.distanceM })
+                if (ticks % 10 == 0L) {
+                    fieldLog.everySecond(peers.associate { Crypto.hex(it.pseudonym) to it.distanceM })
+                    radio.pruneLinks()
+                }
                 if (ticks % 600 == 0L) fieldLog.everyMinute(battery())
                 if (ticks % 2 == 0L) listeners.forEach { it(d, peers) }
             }

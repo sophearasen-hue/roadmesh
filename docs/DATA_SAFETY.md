@@ -11,4 +11,6 @@ Kept in step with the code; the store forms must match it exactly (CLAUDE.md "St
 
 No names, phone numbers, plates, contacts, photos or advertising IDs are collected. The app makes no network connections in Step 5 (debug builds have Flutter's INTERNET permission for hot reload only).
 
-Android permissions: Bluetooth scan and advertise (no connections), fine location, foreground service (connected device + location), notifications.
+Android permissions: Bluetooth scan, advertise and connect (short links to nearby iPhones only, no pairing), fine location, foreground service (connected device + location), notifications.
+
+iOS: Bluetooth (always), location when in use and in the background during a drive (purpose texts in English and Khmer), background modes bluetooth-central, bluetooth-peripheral and location. Privacy manifest in the plugin: precise location for app functionality, not linked to the user, no tracking; UserDefaults for the key-to-certificate mapping (reason CA92.1). Keys in the Secure Enclave.

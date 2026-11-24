@@ -11,6 +11,7 @@
 pub mod auth;
 pub mod behavior;
 pub mod config;
+pub mod fragment;
 pub mod geo;
 pub mod geometry;
 pub mod ldm;
