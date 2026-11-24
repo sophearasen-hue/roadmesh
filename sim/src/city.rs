@@ -19,7 +19,7 @@
 //! Simulator only: seeded randomness and, when signature checks are off, a
 //! plain pseudonym source with no signatures.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::f64::consts::{FRAC_PI_2, PI};
 use std::sync::Arc;
 
@@ -157,7 +157,7 @@ pub struct CityOptions {
     pub duration_s: f64,
     /// Real ECDSA certificates and signature checks (slow with many vehicles).
     pub security: bool,
-    /// Phones relay each other's messages (full relay rules arrive in Step 7).
+    /// Phones relay each other's messages (SPEC §5 rules in the product profile).
     pub relay: bool,
     /// Core configuration.
     pub config: Config,
@@ -671,6 +671,16 @@ pub struct CityStats {
     pub app_km: f64,
     /// Alert episodes and false alarms per alert kind: (alerts, false, false Danger).
     pub by_kind: BTreeMap<String, (u64, u64, u64)>,
+    /// Own messages sent (hop 0) and relayed copies sent.
+    pub originals: u64,
+    /// See `originals`.
+    pub relays: u64,
+    /// Relayed copies of events (hard braking, stopped traffic).
+    pub event_relays: u64,
+    /// Own events sent.
+    pub events: u64,
+    /// A phone relayed the same message twice (SPEC §5 rule 2: must be 0).
+    pub duplicate_relays: u64,
 }
 
 impl CityStats {
@@ -704,6 +714,11 @@ impl CityStats {
         self.vehicles += o.vehicles;
         self.honest_blocked += o.honest_blocked;
         self.app_km += o.app_km;
+        self.originals += o.originals;
+        self.relays += o.relays;
+        self.event_relays += o.event_relays;
+        self.events += o.events;
+        self.duplicate_relays += o.duplicate_relays;
         for (k, v) in &o.by_kind {
             let e = self.by_kind.entry(k.clone()).or_default();
             e.0 += v.0;
@@ -792,6 +807,8 @@ pub struct City {
     /// accounted for that vehicle.
     advising: BTreeMap<(usize, usize), (f64, f64)>,
     pending_own: Vec<Option<OwnState>>,
+    /// (phone, sender pseudonym, message id) of every relayed copy sent.
+    relayed: HashSet<(usize, [u8; 4], u16)>,
 }
 
 fn debug() -> bool {
@@ -972,6 +989,7 @@ impl City {
             last_near: BTreeMap::new(),
             advising: BTreeMap::new(),
             pending_own: Vec::new(),
+            relayed: HashSet::new(),
         }
     }
 
@@ -1064,6 +1082,19 @@ impl City {
                 at_junction: self.map.distance_to_junction(own.motion.x, own.motion.y) < 150.0,
             };
             for f in obu.transmit(now, own, &road, id) {
+                if let Ok(m) = roadmesh_core::rsm::Rsm::decode(&f.body) {
+                    let event = m.msg_type == roadmesh_core::rsm::MsgType::Event;
+                    if m.hop_count == 0 {
+                        self.stats.originals += 1;
+                        self.stats.events += u64::from(event);
+                    } else {
+                        self.stats.relays += 1;
+                        self.stats.event_relays += u64::from(event);
+                        if !self.relayed.insert((i, m.temp_id, m.msg_id)) {
+                            self.stats.duplicate_relays += 1;
+                        }
+                    }
+                }
                 frames.push((i, f));
             }
         }
