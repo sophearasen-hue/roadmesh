@@ -44,7 +44,7 @@ impl CaKey for DevKey {
 struct AcceptForFieldTest;
 
 impl Attestation for AcceptForFieldTest {
-    fn verify(&self, _: &[u8; 33], _: &[u8]) -> bool {
+    fn verify(&self, _: &[u8; 33], _: &[u8], _: &[u8]) -> bool {
         true
     }
 }

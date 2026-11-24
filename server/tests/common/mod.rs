@@ -55,7 +55,7 @@ impl CaKey for SoftCa {
 /// Test-only: evidence "genuine" passes.
 pub struct TestAttestation;
 impl Attestation for TestAttestation {
-    fn verify(&self, _: &[u8; PUBLIC_KEY_LEN], evidence: &[u8]) -> bool {
+    fn verify(&self, _: &[u8; PUBLIC_KEY_LEN], _challenge: &[u8], evidence: &[u8]) -> bool {
         evidence == b"genuine"
     }
 }

@@ -24,7 +24,7 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring"]
 rustls-pki-types = "1"
 # Device certificates (X.509 for mutual TLS), signed through the CA key interface.
 rcgen = { version = "0.14", default-features = false, features = ["pem"] }
-x509-parser = "0.18"
+x509-parser = { version = "0.18", features = ["verify"] }
 time = "0.3"
 p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "pkcs8"] }
 sha2 = "0.11"
@@ -32,6 +32,8 @@ sha2 = "0.11"
 ciborium = "0.2"
 serde_json = "1"
 base64 = "0.22"
+aes-kw = { version = "0.3", default-features = false }
+ring = "0.17"
 aws-config = { version = "1", optional = true, default-features = false, features = ["behavior-version-latest", "rt-tokio", "default-https-client"] }
 aws-sdk-kms = { version = "1", optional = true, default-features = false, features = ["rt-tokio", "default-https-client"] }
 

@@ -31,8 +31,10 @@ pub trait CaKey {
 
 /// Proof that a request comes from the genuine RoadMesh app on a real device.
 pub trait Attestation {
-    /// True if `evidence` proves `device_key` belongs to a genuine app install.
-    fn verify(&self, device_key: &[u8; PUBLIC_KEY_LEN], evidence: &[u8]) -> bool;
+    /// True if `evidence` proves that a genuine app install made this request:
+    /// `challenge` is the request's signed bytes (they include `device_key`, the
+    /// pseudonym keys and the time), and the evidence must be bound to them.
+    fn verify(&self, device_key: &[u8; PUBLIC_KEY_LEN], challenge: &[u8], evidence: &[u8]) -> bool;
 }
 
 /// Accepts no device. The default until App Attest / Play Integrity are built (Step 9).
@@ -40,7 +42,7 @@ pub trait Attestation {
 pub struct RejectAll;
 
 impl Attestation for RejectAll {
-    fn verify(&self, _: &[u8; PUBLIC_KEY_LEN], _: &[u8]) -> bool {
+    fn verify(&self, _: &[u8; PUBLIC_KEY_LEN], _challenge: &[u8], _: &[u8]) -> bool {
         false
     }
 }
@@ -217,7 +219,10 @@ impl<K: CaKey, A: Attestation> CertAuthority<K, A> {
         if !pki::verify_signature(&dk, &req.to_be_signed(), &req.signature) {
             return Err(IssueError::BadSignature);
         }
-        if !self.attestation.verify(&req.device_key, &req.attestation) {
+        if !self
+            .attestation
+            .verify(&req.device_key, &req.to_be_signed(), &req.attestation)
+        {
             return Err(IssueError::AttestationFailed);
         }
         let id = device_id(&req.device_key);

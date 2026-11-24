@@ -46,7 +46,7 @@ impl CaKey for TestCa {
 }
 struct Genuine;
 impl Attestation for Genuine {
-    fn verify(&self, _: &[u8; 33], _: &[u8]) -> bool {
+    fn verify(&self, _: &[u8; 33], _: &[u8], _: &[u8]) -> bool {
         true
     }
 }
