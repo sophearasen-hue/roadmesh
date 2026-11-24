@@ -160,7 +160,7 @@ jobs:
       - name: Run each target (AUDIT S-10; the 24 h release run is in docs/RELEASE.md)
         working-directory: fuzz
         run: |
-          for t in rsm_frame receive_pipeline pki_parsers fragments mqtt; do
+          for t in rsm_frame receive_pipeline pki_parsers fragments mqtt server_inputs; do
             cargo +"${FUZZ_TOOLCHAIN}" fuzz run -O "$t" -- -max_total_time=300
           done
 
