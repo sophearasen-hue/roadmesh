@@ -8,7 +8,6 @@ import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
 import com.roadmesh.core.AlertLevel
-import com.roadmesh.core.DecisionInfo
 import com.roadmesh.core.PeerInfo
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -29,8 +28,34 @@ class RoadmeshAndroidPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ev
     private var permissionResult: MethodChannel.Result? = null
     private val main = Handler(Looper.getMainLooper())
 
-    private val listener: (DecisionInfo, List<PeerInfo>) -> Unit = { d, peers ->
-        main.post { sink?.success(mapOf("alerts" to d.alerts.map(::alert), "peers" to peers.map(::peer))) }
+    private val listener: (Update) -> Unit = { u ->
+        val m = mapOf(
+            "alerts" to u.decision.alerts.map(::alert),
+            "peers" to u.peers.map(::peer),
+            "own" to mapOf(
+                "speed" to u.fix.speedMps,
+                "heading" to u.fix.headingDeg,
+                "accuracy" to u.fix.accuracyM,
+                "limit" to u.road.speedLimitMps,
+            ),
+            "trip" to mapOf(
+                "distance" to u.trip.distanceM,
+                "avgSpeed" to u.trip.avgSpeedMps,
+                "maxSpeed" to u.trip.maxSpeedMps,
+                "score" to u.trip.score.toInt(),
+                "counts" to counts(u.trip.counts),
+            ),
+            "events" to u.events.map {
+                mapOf(
+                    "age" to it.ageS,
+                    "kind" to it.kind,
+                    "me" to it.me,
+                    "id" to Crypto.hex(it.pseudonym),
+                    "kmh" to it.kmh,
+                )
+            },
+        )
+        main.post { sink?.success(m) }
     }
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -66,6 +91,10 @@ class RoadmeshAndroidPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ev
                 "createCertificateRequest" -> result.success(svc?.createCertificateRequest())
                 "importCertificates" -> result.success(svc?.importCertificates())
                 "exportFieldLog" -> result.success(svc?.exportFieldLog())
+                "deleteMyData" -> {
+                    svc?.deleteMyData()
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         } catch (e: Exception) {
@@ -128,6 +157,14 @@ class RoadmeshAndroidPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ev
         "distance" to a.distanceM,
         "ttc" to a.ttcS,
         "hops" to a.hops.toInt(),
+        "target" to a.target?.let { Crypto.hex(it) },
+    )
+
+    private fun counts(c: com.roadmesh.core.EventCounts): Map<String, Int> = mapOf(
+        "speeding" to c.speeding.toInt(),
+        "hacc" to c.harshAccels.toInt(),
+        "hbrake" to c.harshBrakes.toInt(),
+        "overtake" to c.overtakes.toInt(),
     )
 
     private fun peer(p: PeerInfo): Map<String, Any?> = mapOf(
@@ -136,10 +173,14 @@ class RoadmeshAndroidPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ev
         "north" to p.northM,
         "distance" to p.distanceM,
         "speed" to p.speedMps,
+        "accel" to p.accelMps2,
         "heading" to p.headingDeg,
         "vehicleType" to p.vehicleType.toInt(),
         "hops" to p.hops.toInt(),
         "accuracy" to p.accuracyM,
+        "ageMs" to p.ageMs.toInt(),
+        "score" to p.score.toInt(),
+        "counts" to counts(p.counts),
     )
 
     companion object {

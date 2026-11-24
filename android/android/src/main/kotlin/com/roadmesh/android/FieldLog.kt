@@ -58,6 +58,15 @@ class FieldLog(private val ratePerSecond: Int = 10) {
         minute++
     }
 
+    /** Forget everything ("Delete my data"). */
+    @Synchronized
+    fun clear() {
+        stats = bands.associate { it.first to BandStats() }.toMutableMap()
+        thisSecond.clear()
+        rows.clear()
+        minute = 0
+    }
+
     /** The log as CSV. */
     @Synchronized
     fun csv(): String =

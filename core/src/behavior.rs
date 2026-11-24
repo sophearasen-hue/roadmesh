@@ -150,6 +150,8 @@ pub struct Profile {
     pub tailgate_episodes: u32,
     /// SPEC §7 episode-score state: current score.
     pub episode_score: f64,
+    /// Distance covered while observed (m).
+    pub distance_m: f64,
 }
 
 impl Profile {
@@ -331,6 +333,7 @@ impl BehaviorMonitor {
             p.last_seen = now;
             p.samples += 1;
             p.speed_sum += m.speed;
+            p.distance_m += m.speed * dt.max(0.0);
             p.max_speed = p.max_speed.max(m.speed);
         }
         let mut st = self.cars.get(&who).copied().unwrap_or_default();

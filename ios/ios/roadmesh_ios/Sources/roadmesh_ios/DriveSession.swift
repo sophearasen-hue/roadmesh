@@ -9,8 +9,8 @@ import UIKit
 final class DriveSession: NSObject, CLLocationManagerDelegate {
     static var current: DriveSession?
 
-    /// UI listeners, 5 per second: decision and peers.
-    var listener: ((DecisionInfo, [PeerInfo]) -> Void)?
+    /// UI listener, 5 per second: what the engine decided and knows.
+    var listener: ((DriveUpdate) -> Void)?
 
     private let keys = KeychainKeys()
     private lazy var enrolment = Enrolment(keys: keys)
@@ -114,7 +114,10 @@ final class DriveSession: NSObject, CLLocationManagerDelegate {
             r.pruneLinks()
         }
         if ticks % 600 == 0 { fieldLog.everyMinute(batteryPct: Int(max(UIDevice.current.batteryLevel, 0) * 100)) }
-        if ticks % 2 == 0 { listener?(d, peers) }
+        if ticks % 2 == 0, let l = listener {
+            l(DriveUpdate(decision: d, peers: peers, fix: f, road: road,
+                          trip: e.trip(), events: e.events(now: t, max: 40)))
+        }
     }
 
     private func received(_ frame: Data, rssi: Int) {
@@ -143,6 +146,12 @@ final class DriveSession: NSObject, CLLocationManagerDelegate {
         ]
     }
 
+    /// "Delete my data" on this phone (trip, behaviour, peers heard, field log).
+    func deleteMyData() {
+        engine?.deleteMyData()
+        fieldLog.clear()
+    }
+
     func createCertificateRequest() throws -> String { try enrolment.createRequest().path }
 
     func importCertificates() throws -> Int {
@@ -156,4 +165,14 @@ final class DriveSession: NSObject, CLLocationManagerDelegate {
         try fieldLog.csv().write(to: url, atomically: true, encoding: .utf8)
         return url.path
     }
+}
+
+/// One UI update. The UI decides nothing.
+struct DriveUpdate {
+    let decision: DecisionInfo
+    let peers: [PeerInfo]
+    let fix: OwnFix
+    let road: RoadInfo
+    let trip: TripInfo
+    let events: [EventInfo]
 }

@@ -13,7 +13,7 @@ use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use roadmesh_core::auth::{Signer, Verifier};
-use roadmesh_core::behavior::SpeedLimits;
+use roadmesh_core::behavior::{EventKind, Profile, SpeedLimits, Subject};
 use roadmesh_core::config::Config;
 use roadmesh_core::geo::{GeoOrigin, compass_deg_to_math, math_to_compass_deg};
 use roadmesh_core::obu::{self, Obu, OwnState, RoadContext, RxOutcome};
@@ -169,6 +169,8 @@ pub struct PeerInfo {
     pub distance_m: f64,
     /// Speed (m/s).
     pub speed_mps: f64,
+    /// Reported acceleration (m/s², negative when braking).
+    pub accel_mps2: f64,
     /// Compass heading (degrees).
     pub heading_deg: f64,
     /// Vehicle type code.
@@ -179,6 +181,54 @@ pub struct PeerInfo {
     pub accuracy_m: f64,
     /// Age of its latest message (ms).
     pub age_ms: u32,
+    /// Driving score 0–100 observed by this phone (SPEC §7; 100 until something is seen).
+    pub score: u8,
+    /// Behaviour episodes observed while it was in my mesh.
+    pub counts: EventCounts,
+}
+
+/// Behaviour episode counts (SPEC §7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Record)]
+pub struct EventCounts {
+    /// Speeding episodes.
+    pub speeding: u32,
+    /// Harsh accelerations.
+    pub harsh_accels: u32,
+    /// Harsh braking.
+    pub harsh_brakes: u32,
+    /// Overtakes.
+    pub overtakes: u32,
+}
+
+/// This phone's own trip.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct TripInfo {
+    /// Distance (m).
+    pub distance_m: f64,
+    /// Average speed (m/s).
+    pub avg_speed_mps: f64,
+    /// Top speed (m/s).
+    pub max_speed_mps: f64,
+    /// Driving score 0–100.
+    pub score: u8,
+    /// Episode counts.
+    pub counts: EventCounts,
+}
+
+/// One behaviour event for the timeline. `kind` is a stable key the app maps to its
+/// strings: "speeding", "hacc", "hbrake", "overtake", "tailgating".
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct EventInfo {
+    /// Seconds ago.
+    pub age_s: f64,
+    /// Event key.
+    pub kind: String,
+    /// This phone's own vehicle.
+    pub me: bool,
+    /// The peer's pseudonym (empty for me). For display only; never log it.
+    pub pseudonym: Vec<u8>,
+    /// Speed at the time (km/h).
+    pub kmh: f64,
 }
 
 /// What happened to a received frame (for counters; never log the contents).
@@ -455,6 +505,8 @@ impl SafetyEngine {
         let g = self.lock();
         let me = g.own(&fix).motion;
         let (view, _) = g.obu.peer_view();
+        let profiles = g.obu.behavior().profiles();
+        let cfg = g.obu.config();
         view.iter()
             .map(|e| {
                 let m = &e.msg;
@@ -465,19 +517,101 @@ impl SafetyEngine {
                     north_m: north,
                     distance_m: east.hypot(north),
                     speed_mps: m.motion.speed,
+                    accel_mps2: m.motion.accel,
                     heading_deg: math_to_compass_deg(m.motion.heading),
                     vehicle_type: vehicle_code(m.vehicle_type),
                     hops: e.hops,
                     accuracy_m: m.pos_accuracy_m,
                     age_ms: ((now - m.t).max(0.0) * 1000.0).min(f64::from(u32::MAX)) as u32,
+                    score: profiles
+                        .get(&Subject::Peer(m.temp_id))
+                        .map_or(100, |p| p.score(cfg)),
+                    counts: profiles
+                        .get(&Subject::Peer(m.temp_id))
+                        .map(counts)
+                        .unwrap_or_default(),
                 }
             })
             .collect()
     }
 
+    /// This phone's own trip so far.
+    pub fn trip(&self) -> TripInfo {
+        let g = self.lock();
+        let p = g
+            .obu
+            .behavior()
+            .profiles()
+            .get(&Subject::Me)
+            .copied()
+            .unwrap_or(Profile {
+                episode_score: 100.0,
+                ..Profile::default()
+            });
+        TripInfo {
+            distance_m: p.distance_m,
+            avg_speed_mps: p.avg_speed(),
+            max_speed_mps: p.max_speed,
+            score: p.score(g.obu.config()),
+            counts: counts(&p),
+        }
+    }
+
+    /// The newest `max` behaviour events (own and peers in my mesh), newest first.
+    pub fn events(&self, now: f64, max: u32) -> Vec<EventInfo> {
+        let g = self.lock();
+        g.obu
+            .behavior()
+            .events()
+            .iter()
+            .rev()
+            .filter_map(|e| {
+                let (kind, kmh) = match e.kind {
+                    EventKind::Speeding { kmh, .. } => ("speeding", kmh),
+                    EventKind::HarshAccel { kmh, .. } => ("hacc", kmh),
+                    EventKind::HarshBrake { kmh, .. } => ("hbrake", kmh),
+                    EventKind::Overtake { kmh, .. } => ("overtake", kmh),
+                    EventKind::Tailgating { kmh, .. } => ("tailgating", kmh),
+                    EventKind::SpeedingEnd { .. } | EventKind::TailgatingEnd { .. } => {
+                        return None;
+                    }
+                };
+                Some(EventInfo {
+                    age_s: (now - e.t).max(0.0),
+                    kind: kind.into(),
+                    me: e.who == Subject::Me,
+                    pseudonym: match e.who {
+                        Subject::Me => Vec::new(),
+                        Subject::Peer(id) => id.to_vec(),
+                    },
+                    kmh,
+                })
+            })
+            .take(max as usize)
+            .collect()
+    }
+
+    /// "Delete my data" on this phone: the trip, behaviour records, peers heard and
+    /// pending reports. Certificates and blocked senders are kept.
+    pub fn delete_my_data(&self) {
+        let mut g = self.lock();
+        g.obu.forget_all();
+        g.reports.clear();
+        g.last_decide = None;
+    }
+
     /// Signed misbehaviour reports waiting to be sent to the server (taken once).
     pub fn take_reports(&self) -> Vec<Vec<u8>> {
         std::mem::take(&mut self.lock().reports)
+    }
+}
+
+fn counts(p: &Profile) -> EventCounts {
+    EventCounts {
+        speeding: p.speeding_episodes,
+        harsh_accels: p.harsh_accels,
+        harsh_brakes: p.harsh_brakes,
+        overtakes: p.overtakes,
     }
 }
 

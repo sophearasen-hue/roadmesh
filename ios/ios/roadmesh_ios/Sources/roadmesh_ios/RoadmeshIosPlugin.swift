@@ -37,10 +37,9 @@ public class RoadmeshIosPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
                 let type = UInt8((args?["vehicleType"] as? Int) ?? 1)
                 let s = DriveSession.current ?? DriveSession(vehicleType: type, devAnchorHex: devAnchor)
                 DriveSession.current = s
-                s.listener = { [weak self] d, peers in
-                    DispatchQueue.main.async {
-                        self?.sink?(["alerts": d.alerts.map(Self.alert), "peers": peers.map(Self.peer)])
-                    }
+                s.listener = { [weak self] u in
+                    let m = Self.update(u)
+                    DispatchQueue.main.async { self?.sink?(m) }
                 }
                 s.start()
                 result(nil)
@@ -56,6 +55,9 @@ public class RoadmeshIosPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
                 result(try DriveSession.current?.importCertificates())
             case "exportFieldLog":
                 result(try DriveSession.current?.exportFieldLog())
+            case "deleteMyData":
+                DriveSession.current?.deleteMyData()
+                result(nil)
             default:
                 result(FlutterMethodNotImplemented)
             }
@@ -84,12 +86,34 @@ public class RoadmeshIosPlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         // missing values travel as NSNull through the Flutter codec
         return ["kind": a.kind, "level": level, "advice": a.advice, "advisedDecel": a.advisedDecelMps2,
                 "distance": a.distanceM.map { $0 as Any } ?? NSNull(),
-                "ttc": a.ttcS.map { $0 as Any } ?? NSNull(), "hops": Int(a.hops)]
+                "ttc": a.ttcS.map { $0 as Any } ?? NSNull(), "hops": Int(a.hops),
+                "target": a.target.map { Crypto.hex($0) as Any } ?? NSNull()]
+    }
+
+    private static func counts(_ c: EventCounts) -> [String: Any] {
+        ["speeding": Int(c.speeding), "hacc": Int(c.harshAccels), "hbrake": Int(c.harshBrakes),
+         "overtake": Int(c.overtakes)]
+    }
+
+    private static func update(_ u: DriveUpdate) -> [String: Any] {
+        [
+            "alerts": u.decision.alerts.map(alert),
+            "peers": u.peers.map(peer),
+            "own": ["speed": u.fix.speedMps, "heading": u.fix.headingDeg, "accuracy": u.fix.accuracyM,
+                    "limit": u.road.speedLimitMps.map { $0 as Any } ?? NSNull()],
+            "trip": ["distance": u.trip.distanceM, "avgSpeed": u.trip.avgSpeedMps,
+                     "maxSpeed": u.trip.maxSpeedMps, "score": Int(u.trip.score),
+                     "counts": counts(u.trip.counts)],
+            "events": u.events.map {
+                ["age": $0.ageS, "kind": $0.kind, "me": $0.me, "id": Crypto.hex($0.pseudonym), "kmh": $0.kmh]
+            },
+        ]
     }
 
     private static func peer(_ p: PeerInfo) -> [String: Any] {
         ["id": Crypto.hex(p.pseudonym), "east": p.eastM, "north": p.northM, "distance": p.distanceM,
-         "speed": p.speedMps, "heading": p.headingDeg, "vehicleType": Int(p.vehicleType),
-         "hops": Int(p.hops), "accuracy": p.accuracyM]
+         "speed": p.speedMps, "accel": p.accelMps2, "heading": p.headingDeg, "vehicleType": Int(p.vehicleType),
+         "hops": Int(p.hops), "accuracy": p.accuracyM, "ageMs": Int(p.ageMs), "score": Int(p.score),
+         "counts": counts(p.counts)]
     }
 }

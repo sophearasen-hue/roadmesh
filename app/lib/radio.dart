@@ -14,10 +14,14 @@ class Peer {
       north = (m['north'] as num?)?.toDouble() ?? 0,
       distance = (m['distance'] as num?)?.toDouble() ?? 0,
       speed = (m['speed'] as num?)?.toDouble() ?? 0,
+      accel = (m['accel'] as num?)?.toDouble() ?? 0,
       heading = (m['heading'] as num?)?.toDouble() ?? 0,
       vehicleType = m['vehicleType'] as int? ?? 0,
       hops = m['hops'] as int? ?? 0,
-      accuracy = (m['accuracy'] as num?)?.toDouble() ?? 0;
+      accuracy = (m['accuracy'] as num?)?.toDouble() ?? 0,
+      ageMs = m['ageMs'] as int? ?? 0,
+      score = m['score'] as int? ?? 100,
+      counts = EventCounts.fromMap(m['counts']);
 
   /// Display key (changes with the pseudonym; never log it).
   final String id;
@@ -31,6 +35,9 @@ class Peer {
   /// Speed (m/s).
   final double speed;
 
+  /// Reported acceleration (m/s²).
+  final double accel;
+
   /// Compass heading (degrees).
   final double heading;
 
@@ -42,6 +49,117 @@ class Peer {
 
   /// Reported position accuracy (m).
   final double accuracy;
+
+  /// Age of its latest message (ms).
+  final int ageMs;
+
+  /// Driving score 0–100 observed by this phone.
+  final int score;
+
+  /// Behaviour episodes observed while it was in my mesh.
+  final EventCounts counts;
+}
+
+/// Behaviour episode counts.
+class EventCounts {
+  /// Builds counts from the service's map (missing = zero).
+  EventCounts.fromMap(Object? o)
+    : speeding = _int(o, 'speeding'),
+      hacc = _int(o, 'hacc'),
+      hbrake = _int(o, 'hbrake'),
+      overtake = _int(o, 'overtake');
+
+  /// Counts by event key ("speeding", "hacc", "hbrake", "overtake").
+  final int speeding, hacc, hbrake, overtake;
+
+  /// Count for an event key.
+  int of(String key) => switch (key) {
+    'speeding' => speeding,
+    'hacc' => hacc,
+    'hbrake' => hbrake,
+    'overtake' => overtake,
+    _ => 0,
+  };
+
+  /// Sum of all counts.
+  int get total => speeding + hacc + hbrake + overtake;
+
+  static int _int(Object? o, String k) =>
+      o is Map ? (o[k] as num?)?.toInt() ?? 0 : 0;
+}
+
+/// This phone's own state as the engine used it.
+class OwnState {
+  /// Builds the own state from the service's map.
+  OwnState.fromMap(Object? o)
+    : speed = _d(o, 'speed') ?? 0,
+      heading = _d(o, 'heading') ?? 0,
+      accuracy = _d(o, 'accuracy') ?? 0,
+      limit = _d(o, 'limit');
+
+  /// Speed (m/s).
+  final double speed;
+
+  /// Compass heading (degrees).
+  final double heading;
+
+  /// GPS accuracy (m).
+  final double accuracy;
+
+  /// Speed limit here (m/s), if the map knows it.
+  final double? limit;
+
+  static double? _d(Object? o, String k) =>
+      o is Map ? (o[k] as num?)?.toDouble() : null;
+}
+
+/// This phone's own trip.
+class Trip {
+  /// Builds the trip from the service's map.
+  Trip.fromMap(Object? o)
+    : distance = OwnState._d(o, 'distance') ?? 0,
+      avgSpeed = OwnState._d(o, 'avgSpeed') ?? 0,
+      maxSpeed = OwnState._d(o, 'maxSpeed') ?? 0,
+      score = o is Map ? (o['score'] as num?)?.toInt() ?? 100 : 100,
+      counts = EventCounts.fromMap(o is Map ? o['counts'] : null);
+
+  /// Distance (m).
+  final double distance;
+
+  /// Average and top speed (m/s).
+  final double avgSpeed, maxSpeed;
+
+  /// Driving score 0–100.
+  final int score;
+
+  /// Episode counts.
+  final EventCounts counts;
+}
+
+/// One behaviour event for the timeline.
+class BehaviourEvent {
+  /// Builds an event from the service's map.
+  BehaviourEvent.fromMap(Map<Object?, Object?> m)
+    : age = (m['age'] as num?)?.toDouble() ?? 0,
+      kind = m['kind'] as String? ?? '',
+      me = m['me'] as bool? ?? false,
+      id = m['id'] as String? ?? '',
+      kmh = (m['kmh'] as num?)?.toDouble() ?? 0;
+
+  /// Seconds ago.
+  final double age;
+
+  /// "speeding", "hacc", "hbrake", "overtake" or "tailgating".
+  final String kind;
+
+  /// My own vehicle.
+  final bool me;
+
+  /// The peer's display key (empty for me).
+  final String id;
+
+  /// Speed at the time (km/h).
+  final double kmh;
 }
 
 /// One alert; `kind` and `advice` are keys the app maps to its ARB strings.
@@ -52,7 +170,10 @@ class Alert {
       level = m['level'] as String? ?? 'caution',
       advice = m['advice'] as String? ?? 'None',
       advisedDecel = (m['advisedDecel'] as num?)?.toDouble() ?? 0,
-      distance = (m['distance'] as num?)?.toDouble();
+      distance = (m['distance'] as num?)?.toDouble(),
+      ttc = (m['ttc'] as num?)?.toDouble(),
+      hops = m['hops'] as int? ?? 0,
+      target = m['target'] as String?;
 
   /// Alert kind key, e.g. "CrossingConflict".
   final String kind;
@@ -68,6 +189,15 @@ class Alert {
 
   /// Distance (m), if known.
   final double? distance;
+
+  /// Predicted time to conflict (s), if known.
+  final double? ttc;
+
+  /// Relays the information came through.
+  final int hops;
+
+  /// Display key of the other vehicle, if any.
+  final String? target;
 }
 
 /// One update from the drive service (5 per second).
@@ -78,6 +208,15 @@ class RadioUpdate {
   /// Vehicles heard.
   final List<Peer> peers;
 
+  /// My own state.
+  final OwnState own;
+
+  /// My trip so far.
+  final Trip trip;
+
+  /// Newest behaviour events first.
+  final List<BehaviourEvent> events;
+
   /// Builds an update from the service's map.
   RadioUpdate.fromMap(Map<Object?, Object?> m)
     : alerts = ((m['alerts'] as List?) ?? const [])
@@ -85,6 +224,11 @@ class RadioUpdate {
           .toList(),
       peers = ((m['peers'] as List?) ?? const [])
           .map((e) => Peer.fromMap(e as Map<Object?, Object?>))
+          .toList(),
+      own = OwnState.fromMap(m['own']),
+      trip = Trip.fromMap(m['trip']),
+      events = ((m['events'] as List?) ?? const [])
+          .map((e) => BehaviourEvent.fromMap(e as Map<Object?, Object?>))
           .toList();
 }
 
@@ -122,6 +266,9 @@ class RoadMeshRadio {
   /// Debug: import the certificates the developer CA returned; returns how many are held.
   static Future<int?> importCertificates() =>
       _methods.invokeMethod<int>('importCertificates');
+
+  /// "Delete my data" on this phone.
+  static Future<void> deleteMyData() => _methods.invokeMethod('deleteMyData');
 
   /// Field test: write the CSV log; returns its path.
   static Future<String?> exportFieldLog() =>

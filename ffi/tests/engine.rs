@@ -196,3 +196,41 @@ fn no_certificate_means_receive_only() {
     assert!(e.transmit(T0, fix(11.5, 104.9, 0.0, 5.0), road).is_empty());
     assert!(e.pseudonym(T0).is_empty());
 }
+
+#[test]
+fn trip_timeline_and_delete_my_data() {
+    let mut ca = CertAuthority::new(TestCa(SigningKey::generate()), Genuine, Config::spec_v0());
+    let (a, b) = (phone(&mut ca), phone(&mut ca));
+    let road = RoadInfo {
+        speed_limit_mps: Some(40.0 / 3.6),
+        at_junction: false,
+    };
+    let fb = fix(11.5573, 104.9282, 0.0, 10.0);
+    // A rides north at 20 m/s (72 km/h) on a 40 km/h road for 20 s: one speeding episode
+    for k in 0..200 {
+        let now = T0 + f64::from(k) * 0.1;
+        let fa = fix(11.5564 + 0.0000180 * f64::from(k), 104.9282, 0.0, 20.0);
+        for f in b.transmit(now, fb, road) {
+            a.receive(f, now, fa);
+        }
+        a.decide(now, fa, road);
+    }
+    let trip = a.trip();
+    assert!((trip.distance_m - 398.0).abs() < 5.0, "{}", trip.distance_m);
+    assert!((trip.max_speed_mps - 20.0).abs() < 1e-9);
+    assert_eq!(trip.counts.speeding, 1);
+    assert!(trip.score < 100);
+    let ev = a.events(T0 + 20.0, 10);
+    assert!(
+        ev.iter()
+            .any(|e| e.me && e.kind == "speeding" && e.kmh > 70.0)
+    );
+    assert!(ev.iter().filter(|e| e.me).all(|e| e.pseudonym.is_empty()));
+    let peers = a.peers(T0 + 19.9, fix(11.5600, 104.9282, 0.0, 20.0));
+    assert_eq!(peers.len(), 1);
+    assert_eq!(peers[0].score, 100); // a calm peer
+    a.delete_my_data();
+    assert!(a.events(T0 + 20.0, 10).is_empty());
+    assert_eq!(a.trip().distance_m, 0.0);
+    assert!(a.peers(T0 + 20.0, fb).is_empty());
+}
