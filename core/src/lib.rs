@@ -13,6 +13,7 @@ pub mod behavior;
 pub mod config;
 pub mod fragment;
 pub mod geo;
+pub mod geohash;
 pub mod geometry;
 pub mod ldm;
 pub mod map;

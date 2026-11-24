@@ -170,7 +170,8 @@ pub struct CertAuthority<K, A> {
     crl_serial: u32,
 }
 
-fn device_id(key: &[u8; PUBLIC_KEY_LEN]) -> DeviceId {
+/// Device id of a device public key (SHA-256 of the SEC1 compressed key).
+pub fn device_id(key: &[u8; PUBLIC_KEY_LEN]) -> DeviceId {
     pki::sha256(&[key])
 }
 
@@ -362,6 +363,46 @@ impl<K: CaKey, A: Attestation> CertAuthority<K, A> {
     /// Device behind a certificate (server-side only).
     pub fn device_of(&self, d: &CertDigest) -> Option<DeviceId> {
         self.certs.get(d).map(|i| i.device)
+    }
+
+    /// A certificate this CA issued (for checking uploads on the edge server).
+    pub fn certificate(&self, d: &CertDigest) -> Option<&Certificate> {
+        self.certs.get(d).map(|i| &i.cert)
+    }
+
+    /// The device is refused service (revoked after confirmed reports).
+    pub fn is_banned(&self, device: &DeviceId) -> bool {
+        self.devices.get(device).is_some_and(|d| d.banned)
+    }
+
+    /// "Delete my data" (SPEC §10): forget what the server keeps about a device. Kept
+    /// for security only, and only until its last certificate expires (at most one
+    /// week): which certificates it holds (so reports against them still work and a
+    /// device cannot escape revocation by deleting) and a ban. Its report history and
+    /// its record as a reporter go at once.
+    pub fn forget_device(&mut self, device: &DeviceId) {
+        if let Some(d) = self.devices.get_mut(device) {
+            d.reports_sent.clear();
+        }
+        self.reporters.remove(device);
+        for set in self.reporters.values_mut() {
+            set.remove(device);
+        }
+    }
+
+    /// Drop certificates expired more than `keep_s` ago (with their device links) and
+    /// devices with nothing left that are not banned.
+    pub fn prune(&mut self, now: u32, keep_s: u32) {
+        let cutoff = now.saturating_sub(keep_s);
+        self.certs.retain(|_, i| i.cert.valid_until >= cutoff);
+        let live: HashSet<DeviceId> = self.certs.values().map(|i| i.device).collect();
+        self.devices
+            .retain(|id, d| d.banned || live.contains(id) || !d.reports_sent.is_empty());
+    }
+
+    /// Serial of the revocation list (grows with every revocation).
+    pub fn crl_serial(&self) -> u32 {
+        self.crl_serial
     }
 
     /// Is this certificate revoked?
