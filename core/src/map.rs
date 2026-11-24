@@ -91,6 +91,8 @@ pub struct MapMatch {
     pub in_junction: bool,
     /// Confidence in [0, 1].
     pub confidence: f64,
+    /// Heading error to the matched road direction (rad).
+    pub heading_err: f64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -258,7 +260,7 @@ impl RoadMap {
     ) -> Option<MapMatch> {
         let sigma = pos_accuracy_m.max(2.0) * position_sigma_factor.max(1.0);
         let in_junction = self.at_junction(m.x, m.y);
-        let mut best: Option<MapMatch> = None;
+        let mut best: Option<(MapMatch, f64)> = None;
         for p in self.projections(m.x, m.y, 3.0 * sigma + 10.0) {
             let r = &self.roads[p.road];
             let out = self.outside(&p, m.x, m.y);
@@ -274,6 +276,8 @@ impl RoadMap {
                 1.0
             };
             let confidence = pos_like * head_like;
+            // in a junction the heading does not lower confidence, but still picks the road
+            let pick = pos_like * (-0.5 * (err.to_degrees() / heading_sigma_deg).powi(2)).exp();
             let lanes = if flag_bits & flags::OVERTAKING != 0 && !r.one_way {
                 // overtaking may use the oncoming lanes
                 let mut v = r.lane_centres(true);
@@ -300,12 +304,13 @@ impl RoadMap {
                 road_heading,
                 in_junction,
                 confidence,
+                heading_err: err,
             };
-            if best.as_ref().is_none_or(|b| cand.confidence > b.confidence) {
-                best = Some(cand);
+            if best.as_ref().is_none_or(|b| pick > b.1) {
+                best = Some((cand, pick));
             }
         }
-        best
+        best.map(|b| b.0)
     }
 
     /// Lane snapping: a confident match away from junctions is kept on its own side
@@ -331,7 +336,10 @@ impl RoadMap {
         ) else {
             return (*m, None);
         };
-        if mm.in_junction || mm.confidence < cfg.map_min_confidence {
+        // in a junction only a vehicle aligned with a road and not turning is snapped
+        let aligned = mm.heading_err <= cfg.map_junction_snap_max_heading_deg.to_radians()
+            && m.yaw_rate.abs() < cfg.map_snap_max_yaw_rate;
+        if (mm.in_junction && !aligned) || mm.confidence < cfg.map_min_confidence {
             return (*m, Some(mm));
         }
         let mut out = *m;
@@ -447,6 +455,7 @@ mod tests {
             road_heading: 0.0,
             in_junction: false,
             confidence: -1.0,
+            heading_err: 0.0,
         }
     }
 

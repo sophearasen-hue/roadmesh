@@ -1237,6 +1237,23 @@ impl Obu {
         }
 
         // 1. crossing conflict (Danger for the vehicle that must give way, Caution for priority)
+        let ego = trajectory(Motion { accel: 0.0, ..me }, c.horizon_s, c.pred_step_s, 0.0);
+        let own_dims = self.own_dims(x.own);
+        // the collision prediction confirms the paths meet (or miss by under yield_pet_s)
+        let confirmed = |m: &PeerMsg| {
+            traj_of(&m.temp_id).is_some_and(|tr| {
+                first_conflict(
+                    &ego,
+                    own_dims,
+                    tr,
+                    self.peer_dims(m),
+                    self.margin_for(x.own, m),
+                    c.yield_pet_s,
+                    c.pred_step_s,
+                )
+                .is_some()
+            })
+        };
         let mut still = HashSet::new();
         for m in x.fresh {
             if relation(&me, &m.motion) != Relation::Crossing {
@@ -1281,9 +1298,14 @@ impl Obu {
                 if let Some(a) = adv {
                     push_extra(a);
                 }
+                let level = if !c.danger_needs_confirmation || yielding_to_it || confirmed(m) {
+                    Level::Danger
+                } else {
+                    Level::Warning
+                };
                 let mut a = self.alert(
                     AlertKind::CrossingConflict,
-                    Level::Danger,
+                    level,
                     Some((m, hops_of(&id))),
                     &me,
                     adv,
@@ -1353,9 +1375,18 @@ impl Obu {
                     .unwrap_or(0.0)
                     .min(0.0);
                 push_extra(adv);
+                // inside my stopping distance, or on a predicted collision course: Danger
+                let v = me.speed;
+                let stopping = v * c.stopping_reaction_s + v * v / (2.0 * c.advice_firm_max);
+                let close = along <= stopping || x.threats.iter().any(|t| t.msg.temp_id == id);
+                let level = if !c.danger_needs_confirmation || close {
+                    Level::Danger
+                } else {
+                    Level::Warning
+                };
                 out.push(self.alert(
                     AlertKind::HardBrakingAhead,
-                    Level::Danger,
+                    level,
                     Some((m, hops_of(&id))),
                     &me,
                     Some(adv),
@@ -2079,6 +2110,37 @@ mod tests {
     }
 
     /// AUDIT P-30: hard braking ahead, and its 1 s exit hold (P-35)
+    /// User decision (Step 4): beyond my stopping distance, hard braking ahead is a Warning
+    #[test]
+    fn spec_far_hard_braking_is_a_warning_near_is_danger() {
+        let me = own(0.0, 0.0, 0.0, 20.0); // stopping distance 20 + 400/9 = 64 m
+        let road = RoadContext::default();
+        let far = step(
+            &mut spec(),
+            0.0,
+            &me,
+            &road,
+            &[peer(b"lead", 1, 0.0, 150.0, 0.0, 0.0, 20.0, -6.0, 0, 1.0)],
+        );
+        assert!(
+            kinds(&far).contains(&(AlertKind::HardBrakingAhead, Level::Warning)),
+            "{:?}",
+            kinds(&far)
+        );
+        let near = step(
+            &mut spec(),
+            0.0,
+            &me,
+            &road,
+            &[peer(b"lead", 1, 0.0, 60.0, 0.0, 0.0, 20.0, -6.0, 0, 1.0)],
+        );
+        assert!(
+            kinds(&near).contains(&(AlertKind::HardBrakingAhead, Level::Danger)),
+            "{:?}",
+            kinds(&near)
+        );
+    }
+
     #[test]
     fn spec_hard_braking_ahead_enters_and_holds_for_1_s() {
         let mut o = spec();
@@ -2089,7 +2151,7 @@ mod tests {
             0.0,
             &me,
             &road,
-            &[peer(b"lead", 1, 0.0, 120.0, 0.0, 0.0, 20.0, -6.0, 0, 1.0)],
+            &[peer(b"lead", 1, 0.0, 60.0, 0.0, 0.0, 20.0, -6.0, 0, 1.0)],
         );
         assert!(kinds(&d).contains(&(AlertKind::HardBrakingAhead, Level::Danger)));
         // braking stops (decel 1.0 < 1.5): stays for 1 s, then clears
@@ -2105,7 +2167,7 @@ mod tests {
                     b"lead",
                     1 + i,
                     t,
-                    120.0 + 20.0 * t,
+                    60.0 + 20.0 * t,
                     0.0,
                     0.0,
                     20.0,

@@ -133,9 +133,23 @@ pub fn build(seeds: u64, duration_s: f64, threads: usize) -> String {
     let _ = writeln!(r, "## Summary\n");
     let _ = writeln!(r, "| | Result | Target |");
     let _ = writeln!(r, "|---|---|---|");
+    let tn = all.gated_conflicts - all.gated_turn_conflicts;
+    let tm = all.gated_missed - all.gated_turn_missed;
     let _ = writeln!(
         r,
-        "| Missed conflicts, both phones within the GPS confidence gate (8 m) | **{}** ({} of {}) | under 2 % |",
+        "| **Missed conflicts**, both phones within the GPS confidence gate (8 m), not counting turns that had not started | **{}** ({tm} of {tn}) | under 2 % |",
+        pct(tm, tn)
+    );
+    let _ = writeln!(
+        r,
+        "| ... turns that had not started yet (no phone can know a turn before it begins) | {} ({} of {}) | reported separately |",
+        pct(all.gated_turn_missed, all.gated_turn_conflicts),
+        all.gated_turn_missed,
+        all.gated_turn_conflicts
+    );
+    let _ = writeln!(
+        r,
+        "| Missed conflicts, both phones within the gate, all | {} ({} of {}) | – |",
         pct(all.gated_missed, all.gated_conflicts),
         all.gated_missed,
         all.gated_conflicts
@@ -187,7 +201,8 @@ pub fn build(seeds: u64, duration_s: f64, threads: usize) -> String {
          because a phone can only warn about vehicles that broadcast.\n\
          * **Warned in time:** either phone showed a Warning or Danger about the other before \
          the predicted touch came closer than {CRITICAL_TTC_S:.1} s (allowing {GRACE_S:.1} s \
-         for radio and processing). Otherwise the conflict is **missed**.\n\
+         for radio and processing; an alert shown in the last second counts). Otherwise the \
+         conflict is **missed**.\n\
          * **False alarm:** a Warning or Danger about another vehicle when, with true positions \
          and no reaction, the two would never come within 1 m of each other in the next 8 s.\n\
          * **GPS confidence gate:** SPEC §6 allows only a Caution for vehicles whose phone \
@@ -201,7 +216,7 @@ pub fn build(seeds: u64, duration_s: f64, threads: usize) -> String {
     let _ = writeln!(r, "## Results by traffic, radio and GPS\n");
     let _ = writeln!(
         r,
-        "| GPS | Vehicles | Packet loss | Conflicts | Missed (gate) | Missed (all) | False Danger / 100 km | Mean warning time |"
+        "| GPS | Vehicles | Packet loss | Conflicts | Missed (target) | Missed (all) | False Danger / 100 km | Mean warning time |"
     );
     let _ = writeln!(r, "|---|---:|---:|---:|---:|---:|---:|---:|");
     let mut i = 0;
@@ -217,7 +232,10 @@ pub fn build(seeds: u64, duration_s: f64, threads: usize) -> String {
             GPS_BANDS[bi].0,
             loss * 100.0,
             m.conflicts,
-            pct(m.gated_missed, m.gated_conflicts),
+            pct(
+                m.gated_missed - m.gated_turn_missed,
+                m.gated_conflicts - m.gated_turn_conflicts
+            ),
             pct(m.missed, m.conflicts),
             m.false_danger_per_100km(),
             m.lead().0

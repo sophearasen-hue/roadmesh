@@ -163,7 +163,14 @@ impl Ldm {
             let implied = moved / dt;
             let vmax = m.speed.max(prev.motion.speed);
             let jump = match cfg.jump_slack_m {
-                Some(slack) => moved > vmax * dt + slack, // SPEC §10
+                Some(slack) => {
+                    // SPEC §10, widened for poor GPS (user decision, Step 4)
+                    let acc = msg
+                        .pos_accuracy_m
+                        .max(prev.pos_accuracy_m)
+                        .min(cfg.jump_slack_accuracy_cap_m);
+                    moved > vmax * dt + slack.max(cfg.jump_slack_accuracy_factor * acc)
+                }
                 None => implied > vmax * cfg.jump_speed_factor + cfg.jump_speed_slack,
             };
             if jump {
@@ -329,7 +336,26 @@ mod tests {
             ldm.check(&msg(1.1, 7.0, 10.0, 0.0, 2), 1.1, &Config::reference()),
             Check::Misbehaviour(Misbehaviour::PositionJump(_))
         ));
-        // 30 m in 0.1 s at 10 m/s: impossible
+        // poor GPS (10 m reported): a 25 m jump is ordinary
+        let poor = |x: f64, t: f64, id: u16| PeerMsg {
+            pos_accuracy_m: 10.0,
+            ..msg(t, x, 10.0, 0.0, id)
+        };
+        let mut l2 = Ldm::new();
+        l2.update(poor(0.0, 1.0, 1), 1.0, 0);
+        assert_eq!(l2.check(&poor(26.0, 1.1, 2), 1.1, &cfg), Check::Ok);
+        // a sender claiming 60 m accuracy still gets at most 3 × 20 m
+        let liar = |x: f64, t: f64, id: u16| PeerMsg {
+            pos_accuracy_m: 60.0,
+            ..msg(t, x, 10.0, 0.0, id)
+        };
+        let mut l3 = Ldm::new();
+        l3.update(liar(0.0, 1.0, 1), 1.0, 0);
+        assert!(matches!(
+            l3.check(&liar(70.0, 1.1, 2), 1.1, &cfg),
+            Check::Misbehaviour(Misbehaviour::PositionJump(_))
+        ));
+        // 30 m in 0.1 s at 10 m/s with good GPS: impossible
         assert!(matches!(
             ldm.check(&msg(1.1, 30.0, 10.0, 0.0, 3), 1.1, &cfg),
             Check::Misbehaviour(Misbehaviour::PositionJump(_))

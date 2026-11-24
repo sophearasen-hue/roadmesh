@@ -59,6 +59,8 @@ pub const NEAR_MISS_PET_S: f64 = 1.0;
 const ORACLE_HORIZON_S: f64 = 8.0; // covers the 7 s crossing-conflict horizon
 /// A Warning/Danger this soon after the conflict appears still counts (radio and decision delay).
 pub const GRACE_S: f64 = 0.5;
+/// An alert about the vehicle shown within this time still counts (the driver is reacting).
+pub const ALERT_LOOKBACK_S: f64 = 1.0;
 
 /// Driver temperament (prototype `PROF`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -643,6 +645,11 @@ pub struct CityStats {
     pub gated_conflicts: u64,
     /// See `gated_conflicts`.
     pub gated_missed: u64,
+    /// Within the gate, conflicts / missed where a driver was about to turn and had not
+    /// started yet (reported separately, user decision Step 4).
+    pub gated_turn_conflicts: u64,
+    /// See `gated_turn_conflicts`.
+    pub gated_turn_missed: u64,
     /// Why conflicts were missed, one cause each (in this order): never heard by radio,
     /// a phone's GPS beyond the confidence gate, a turn not yet started, other.
     pub miss_causes: [u64; 4],
@@ -682,6 +689,8 @@ impl CityStats {
         self.turn_missed += o.turn_missed;
         self.gated_conflicts += o.gated_conflicts;
         self.gated_missed += o.gated_missed;
+        self.gated_turn_conflicts += o.gated_turn_conflicts;
+        self.gated_turn_missed += o.gated_turn_missed;
         for k in 0..4 {
             self.miss_causes[k] += o.miss_causes[k];
         }
@@ -709,6 +718,17 @@ impl CityStats {
             0.0
         } else {
             self.by_kind.values().map(|v| v.2).sum::<u64>() as f64 * 100.0 / self.app_km
+        }
+    }
+
+    /// The Step 4 target metric: missed share for pairs within the GPS gate, leaving out
+    /// turns that had not started (0–1).
+    pub fn target_missed_rate(&self) -> f64 {
+        let n = self.gated_conflicts - self.gated_turn_conflicts;
+        if n == 0 {
+            0.0
+        } else {
+            (self.gated_missed - self.gated_turn_missed) as f64 / n as f64
         }
     }
 
@@ -1488,12 +1508,12 @@ impl City {
         let direct = self
             .alert_eps
             .get(&(i, j))
-            .filter(|e| self.t - e.last < 0.25)
+            .filter(|e| self.t - e.last < ALERT_LOOKBACK_S)
             .map(|e| e.start);
         let advice = self
             .advising
             .get(&(i, j))
-            .filter(|e| self.t - e.1 < 0.25)
+            .filter(|e| self.t - e.1 < ALERT_LOOKBACK_S)
             .map(|e| e.0);
         direct.into_iter().chain(advice).reduce(f64::min)
     }
@@ -1726,7 +1746,13 @@ impl City {
                     d.worst_ttc.map(|t| (t * 10.0).round() / 10.0),
                     d.alerts
                         .iter()
-                        .map(|a| format!("{:?}/{:?}", a.kind, a.level))
+                        .map(|a| {
+                            let who = a
+                                .target
+                                .and_then(|t| self.owner.get(&t))
+                                .map_or(String::from("-"), |w| format!("#{w}"));
+                            format!("{:?}/{:?}@{who}", a.kind, a.level)
+                        })
                         .collect::<Vec<_>>()
                         .join(",")
                 )
@@ -1787,6 +1813,9 @@ impl City {
         let in_gate = a.gps_sigma_m <= gate && b.gps_sigma_m <= gate;
         if in_gate {
             self.stats.gated_conflicts += 1;
+            if ep.unannounced_turn {
+                self.stats.gated_turn_conflicts += 1;
+            }
         }
         if ep.unannounced_turn {
             self.stats.turn_conflicts += 1;
@@ -1818,6 +1847,9 @@ impl City {
                 self.stats.missed += 1;
                 if in_gate {
                     self.stats.gated_missed += 1;
+                    if ep.unannounced_turn {
+                        self.stats.gated_turn_missed += 1;
+                    }
                 }
                 if ep.unannounced_turn {
                     self.stats.turn_missed += 1;
