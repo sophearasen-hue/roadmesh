@@ -552,3 +552,36 @@ pub fn certificate_public_keys(batch: Vec<u8>) -> Result<Vec<Vec<u8>>, RoadMeshE
 pub fn core_version() -> String {
     roadmesh_core::VERSION.to_owned()
 }
+
+/// Cut a frame into GATT notifications of at most `max_packet` bytes (MTU − 3).
+/// Empty if the packet size is too small.
+#[uniffi::export]
+pub fn split_frame(frame: Vec<u8>, frame_no: u8, max_packet: u32) -> Vec<Vec<u8>> {
+    roadmesh_core::fragment::split(&frame, frame_no, max_packet as usize).unwrap_or_default()
+}
+
+/// Reassembles notifications from one connected phone (untrusted bytes).
+#[derive(uniffi::Object)]
+pub struct FrameReassembler {
+    inner: Mutex<roadmesh_core::fragment::Reassembler>,
+}
+
+#[uniffi::export]
+impl FrameReassembler {
+    /// One reassembler per link.
+    #[uniffi::constructor]
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
+            inner: Mutex::new(roadmesh_core::fragment::Reassembler::new()),
+        })
+    }
+
+    /// Feed one notification; returns the complete frame (empty until then).
+    pub fn push(&self, packet: Vec<u8>) -> Vec<u8> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(&packet)
+            .unwrap_or_default()
+    }
+}

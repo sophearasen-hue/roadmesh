@@ -1,0 +1,8 @@
+.dart_tool/
+build/
+pubspec.lock
+.build/
+.swiftpm/
+# built by scripts/build-ios-core.sh (Rust core + generated bindings)
+ios/roadmesh_ios/Frameworks/
+ios/roadmesh_ios/Sources/roadmesh_ios/RoadMeshCore.swift

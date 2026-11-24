@@ -76,6 +76,7 @@ class RoadmeshAndroidPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Ev
     private val needed = arrayOf(
         Manifest.permission.BLUETOOTH_SCAN,
         Manifest.permission.BLUETOOTH_ADVERTISE,
+        Manifest.permission.BLUETOOTH_CONNECT,
         Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.POST_NOTIFICATIONS,
     )

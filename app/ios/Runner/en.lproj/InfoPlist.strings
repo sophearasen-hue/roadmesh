@@ -1,0 +1,4 @@
+/* Permission texts shown by iOS (English). Keep in step with Info.plist. */
+"NSBluetoothAlwaysUsageDescription" = "RoadMesh uses Bluetooth to exchange safety messages with nearby vehicles so it can warn you about collisions.";
+"NSLocationWhenInUseUsageDescription" = "RoadMesh uses your position to predict collisions with nearby vehicles. It is shared only under a changing pseudonym.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "RoadMesh keeps warning you while the screen is off during a drive.";

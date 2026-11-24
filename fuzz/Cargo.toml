@@ -35,5 +35,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "fragments"
+path = "fuzz_targets/fragments.rs"
+test = false
+doc = false
+bench = false
+
 [profile.release]
 debug = 1

@@ -6,6 +6,7 @@ Every parser of untrusted bytes is fuzzed with [cargo-fuzz](https://github.com/r
 |---|---|---|
 | `rsm_frame` | Raw radio bytes to `Frame::decode` and `Rsm::decode` | Never panics; every accepted frame re-encodes and decodes to the same body and auth |
 | `receive_pipeline` | Raw bytes, or mutations of a validly signed frame, to `Obu::receive_bytes`, then `Obu::decide` | Decode → signature → checks → LDM → relay queue → alerts never panic |
+| `fragments` | GATT notification fragments to the reassembler, and split → reassemble round trips | Never panics; never yields more than a full frame; round trips are exact |
 | `pki_parsers` | Raw bytes, or mutations of a valid report / revocation list, to the certificate, envelope, revocation-list and report parsers and to the server's `CertAuthority::report` | Never panics; certificates and envelopes round-trip |
 
 Keys used by the fixtures are generated from the OS random source at start-up. None are stored.

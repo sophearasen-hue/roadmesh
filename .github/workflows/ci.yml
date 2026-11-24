@@ -66,11 +66,10 @@ jobs:
       - run: flutter gen-l10n
       - run: flutter analyze --fatal-infos
       - run: flutter test
-      - name: Analyze the Android plugin's Dart API
-        working-directory: android
+      - name: Analyze the platform plugins
         run: |
-          flutter pub get
-          flutter analyze --fatal-infos
+          (cd android && flutter pub get && flutter analyze --fatal-infos)
+          (cd ios && flutter pub get && flutter analyze --fatal-infos)
 
   android:
     name: Android (Rust core for 3 ABIs, debug APK, Kotlin tests)
@@ -103,6 +102,33 @@ jobs:
           JAVA_HOME: ${{ env.JAVA_HOME_17_X64 }}
         run: ./gradlew :roadmesh_android:testDebugUnitTest
 
+  ios:
+    name: iOS (Rust core XCFramework, Swift tests, simulator build)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Build the core as an XCFramework and generate the Swift bindings
+        run: scripts/build-ios-core.sh
+      - name: Swift unit tests (RoadMeshKit)
+        working-directory: ios/RoadMeshKit
+        run: swift test
+      - name: Simulator build of the app (Swift Package Manager)
+        working-directory: app
+        run: |
+          flutter config --enable-swift-package-manager
+          flutter pub get --enforce-lockfile
+          flutter build ios --simulator --debug
+
   gitleaks:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
@@ -132,7 +158,7 @@ jobs:
       - name: Run each target (AUDIT S-10; the 24 h release run is in docs/RELEASE.md)
         working-directory: fuzz
         run: |
-          for t in rsm_frame receive_pipeline pki_parsers; do
+          for t in rsm_frame receive_pipeline pki_parsers fragments; do
             cargo +"${FUZZ_TOOLCHAIN}" fuzz run -O "$t" -- -max_total_time=300
           done
 
