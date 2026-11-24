@@ -1,25 +1,35 @@
 # Security policy
 
-RoadMesh is a road safety system. A security flaw can put people in danger, so we treat reports as urgent.
+RoadMesh warns drivers about collisions, so a security flaw can put people at risk. Please tell us privately.
 
 ## Reporting a vulnerability
 
-- Email: security@[your-domain] (set this up before the public launch)
-- Please include: what you found, steps to reproduce, and the app version.
-- Do not test against other people's phones or on public roads.
-- We will confirm receipt within 2 working days.
+- **Email:** `<security contact: set by the project owner before release>`. Encrypt with the PGP key published in the project's `/.well-known/security.txt`.
+- **GitHub:** alternatively, open a private advisory under Security → Report a vulnerability.
+- **What to include:** what you found, how to reproduce it, and the app or server version.
+- **What not to include:** do not test on public roads, and do not send messages that could cause a real driver to brake.
 
-## Our commitments
+We answer within 2 working days. Critical issues are fixed within 7 days (AUDIT S-26). We credit reporters who want credit once the fix is out.
 
-| Severity | Example | Fix target |
-|---|---|---|
-| Critical | Forged alerts accepted, key extraction, remote code execution | 7 days |
-| High | Tracking of a user across pseudonyms, certificate abuse | 30 days |
-| Medium / Low | Other issues | Next release |
+## In scope
 
-We credit reporters who wish to be named, and we will not take legal action against good-faith research that follows this policy.
+- The iPhone and Android apps.
+- The Bluetooth messages and the relay protocol (SPEC §3–§5).
+- The edge server and the certificate authority (docs/SERVER.md).
+- This repository.
 
-## Scope
+## Out of scope
 
-In scope: the iOS and Android apps, the radio message protocol, the edge and certificate servers.
-Out of scope: the `reference/` simulators (they use demo-only cryptography by design).
+- Denial of service by radio jamming. Jamming is physically always possible, and the app fails safe: no warnings, never false braking.
+- Social engineering of staff.
+- Findings that need a rooted or jailbroken phone to read that phone's own data.
+
+## How the system protects itself
+
+The design is in docs/SPEC.md §10, and the checklist is section B of docs/AUDIT.md. In short:
+
+- **Signing:** every message is signed with a hardware key.
+- **Certificates:** they rotate every 5 minutes and are issued only to genuine apps.
+- **Revocation:** a sender is revoked after 3 independent reports.
+- **Parsing:** every received byte is parsed in memory-safe, fuzzed Rust.
+- **Server traffic:** TLS 1.3 with pinning and mutual TLS.

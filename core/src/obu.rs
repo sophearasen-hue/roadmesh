@@ -265,6 +265,10 @@ pub struct Obu {
     outbox: Vec<Frame>,
     /// SPEC §5 rule 3: relays waiting for their back-off, cancelled if someone relays first.
     pending: Vec<PendingRelay>,
+    /// AUDIT S-08 receive budget: (second, frames let through to verification).
+    rx_window: (i64, u32),
+    /// Frames dropped by the receive budget (statistics).
+    rx_budget_drops: u64,
     /// Messages this phone has relayed (never twice, rule 2), with when.
     relayed: HashMap<(TempId, u16), f64>,
     /// Own heartbeats skipped under congestion (rule 6).
@@ -348,6 +352,8 @@ impl Obu {
             own_filter: OwnFilter::default(),
             outbox: Vec::new(),
             pending: Vec::new(),
+            rx_window: (i64::MIN, 0),
+            rx_budget_drops: 0,
             relayed: HashMap::new(),
             congestion_skip: false,
             msg_id: 0,
@@ -617,6 +623,9 @@ impl Obu {
             });
             return RxOutcome::Dropped;
         }
+        if !self.within_rx_budget(&r, now, own) {
+            return RxOutcome::Dropped;
+        }
         let auth = if self.sample_skip(&r) {
             verifier.verify_certificate_only(now, &frame.body, &frame.auth)
         } else {
@@ -700,6 +709,41 @@ impl Obu {
             temp_id: r.temp_id,
             hops: r.hop_count,
         }
+    }
+
+    /// AUDIT S-08: cap the frames that reach signature checking each second; under
+    /// overload keep events and nearby direct heartbeats, drop the rest first.
+    fn within_rx_budget(&mut self, r: &Rsm, now: f64, own: &OwnState) -> bool {
+        let Some(budget) = self.cfg.rx_budget_per_s else {
+            return true;
+        };
+        let sec = now.floor() as i64;
+        if self.rx_window.0 != sec {
+            self.rx_window = (sec, 0);
+        }
+        let n = self.rx_window.1;
+        let ok = if n < budget {
+            true
+        } else if r.msg_type == MsgType::Event {
+            n < budget.saturating_mul(2)
+        } else if r.hop_count == 0 {
+            let (x, y) = self.origin.to_local(r.lat_deg, r.lon_deg);
+            let near = (x - own.motion.x).hypot(y - own.motion.y) <= self.cfg.rx_priority_near_m;
+            near && u64::from(n) * 2 < u64::from(budget) * 3
+        } else {
+            false
+        };
+        if ok {
+            self.rx_window.1 = n + 1;
+        } else {
+            self.rx_budget_drops += 1;
+        }
+        ok
+    }
+
+    /// Frames dropped by the receive budget so far (AUDIT S-08).
+    pub fn rx_budget_drops(&self) -> u64 {
+        self.rx_budget_drops
     }
 
     /// SPEC §5 rules 2–4 and 6: decide whether to relay and when.
@@ -2182,6 +2226,49 @@ mod tests {
 
     fn hb_east(id: &[u8; 4], msg_id: u16) -> Frame {
         peer(id, msg_id, 0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0, 3.0)
+    }
+
+    #[test]
+    fn overload_keeps_events_and_near_vehicles_and_drops_far_heartbeats_first() {
+        let mut cfg = Config::spec_v0();
+        cfg.rx_budget_per_s = Some(10);
+        let mut o = Obu::new(cfg, GeoOrigin::phnom_penh(), false);
+        let me = own(0.0, 0.0, 0.0, 10.0);
+        let mut ids = 0u16;
+        let mut next = |x: f64| {
+            ids += 1;
+            let id = [b'F', (ids >> 8) as u8, ids as u8, 1];
+            peer(&id, 1, 0.0, x, 300.0, 0.0, 10.0, 0.0, 0, 3.0)
+        };
+        // the budget: 10 far heartbeats accepted, the 11th dropped
+        let accepted = (0..11)
+            .filter(|_| {
+                matches!(
+                    o.receive(&next(-400.0), 0.0, &me, &mut NoAuth),
+                    RxOutcome::Accepted { .. }
+                )
+            })
+            .count();
+        assert_eq!((accepted, o.rx_budget_drops()), (10, 1));
+        // over budget: a nearby direct heartbeat still gets through (up to 1.5×) ...
+        let near = peer(b"NEAR", 1, 0.0, 30.0, 0.0, 0.0, 10.0, 0.0, 0, 3.0);
+        assert!(matches!(
+            o.receive(&near, 0.0, &me, &mut NoAuth),
+            RxOutcome::Accepted { .. }
+        ));
+        // ... and an event too (up to 2×), even from far away
+        let ev = as_event(&next(-500.0));
+        assert!(matches!(
+            o.receive(&ev, 0.0, &me, &mut NoAuth),
+            RxOutcome::Accepted { .. }
+        ));
+        // a new second, a new budget
+        assert!(matches!(
+            o.receive(&next(-400.0), 1.0, &me, &mut NoAuth),
+            RxOutcome::Accepted { .. }
+        ));
+        // the reference profile has no cap
+        assert_eq!(Config::reference().rx_budget_per_s, None);
     }
 
     #[test]

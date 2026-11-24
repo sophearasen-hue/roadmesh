@@ -38,6 +38,7 @@ final class Enrolment {
     /// Bind each returned certificate to its Secure Enclave key; returns the batch.
     func importCertificates() throws -> Data {
         let bytes = try Data(contentsOf: certificateFile)
+        Self.excludeFromBackup(certificateFile)
         let batch = defaults.integer(forKey: "batch")
         let count = defaults.integer(forKey: "count")
         var byKey: [String: String] = [:]
@@ -50,6 +51,14 @@ final class Enrolment {
             keys.bind(certDigest: d, tag: tag)
         }
         return bytes
+    }
+
+    /// AUDIT S-14/S-20: certificates stay on this phone (no iCloud backup).
+    static func excludeFromBackup(_ url: URL) {
+        var u = url
+        var v = URLResourceValues()
+        v.isExcludedFromBackup = true
+        try? u.setResourceValues(v)
     }
 
     /// Previously imported certificates, if any.
@@ -77,7 +86,8 @@ final class Enrolment {
         }
         let enrolled = try parseEnrolReply(reply: reply)
         try keys.storeDeviceCertificate(enrolled.deviceCertificate)
-        try enrolled.certificates.write(to: certificateFile)
+        try enrolled.certificates.write(to: certificateFile, options: .completeFileProtectionUntilFirstUserAuthentication)
+        Self.excludeFromBackup(certificateFile)
         return try importCertificates()
     }
 

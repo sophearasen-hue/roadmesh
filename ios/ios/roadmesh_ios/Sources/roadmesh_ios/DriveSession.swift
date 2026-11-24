@@ -24,6 +24,8 @@ final class DriveSession: NSObject, CLLocationManagerDelegate {
     private var lastPseudonym = Data()
     private let fieldLog = FieldLog()
     private var bridge: CellularBridge?
+    /// AUDIT S-12: a jailbroken phone receives and warns but sends nothing.
+    private lazy var receiveOnly = DeviceTrust.compromised
     private let vehicleType: UInt8
     private let devAnchor: String?
 
@@ -103,8 +105,10 @@ final class DriveSession: NSObject, CLLocationManagerDelegate {
         let t = now()
         guard let f = fix(at: t) else { return }
         let frames = e.transmit(now: t, fix: f, road: road)
-        if let frame = frames.first { r.broadcast(frame) }
-        frames.forEach { bridge?.upload($0) } // hazard events only
+        if !receiveOnly {
+            if let frame = frames.first { r.broadcast(frame) }
+            frames.forEach { bridge?.upload($0) } // hazard events only
+        }
         let p = e.pseudonym(now: t)
         if p != lastPseudonym {
             if !lastPseudonym.isEmpty { r.renewAddress() }
@@ -165,7 +169,7 @@ final class DriveSession: NSObject, CLLocationManagerDelegate {
         guard let f = fix(at: t) else { return }
         if case let .accepted(pseudonym) = e.receive(frame: frame, now: t, fix: f) {
             fieldLog.onAccepted(pseudonymHex: Crypto.hex(pseudonym), rssi: rssi)
-            bridge?.upload(frame) // events heard by radio reach phones out of range
+            if !receiveOnly { bridge?.upload(frame) } // events heard by radio reach phones out of range
         }
     }
 
@@ -182,7 +186,8 @@ final class DriveSession: NSObject, CLLocationManagerDelegate {
     func status() -> [String: Any] {
         [
             "running": engine != nil,
-            "canSend": engine != nil, // iPhones send over Bluetooth links (option A)
+            "canSend": engine != nil && !receiveOnly, // iPhones send over Bluetooth links (option A)
+            "receiveOnly": receiveOnly,
             "codedPhy": false,
             "certificates": Int(engine?.validCertificates(now: now()) ?? 0),
         ]

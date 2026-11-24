@@ -175,6 +175,12 @@ pub struct Config {
     pub relay_cutoff_m: f64,
     /// Rule 6: above this many peers, send heartbeats at half rate and relay only events.
     pub congestion_peers: usize,
+    /// AUDIT S-08: frames per second that may reach signature checking (None: no cap).
+    /// Over it, events are still taken up to twice the cap, direct heartbeats from
+    /// vehicles within `rx_priority_near_m` up to 1.5 times; others are dropped first.
+    pub rx_budget_per_s: Option<u32>,
+    /// See `rx_budget_per_s` (m).
+    pub rx_priority_near_m: f64,
 
     // ---------------------------------------------------------------- hazard ahead (stopped traffic)
     /// Look this far ahead for stopped traffic (m).
@@ -429,6 +435,8 @@ impl Config {
             relay_road_width_m: 15.0,
             relay_cutoff_m: 1500.0,
             congestion_peers: 60,
+            rx_budget_per_s: None,
+            rx_priority_near_m: 150.0,
 
             hazard_range_m: 3000.0,
             hazard_stopped_speed: 3.0,
@@ -525,6 +533,8 @@ impl Config {
             off_road_max_m: Some(50.0),
             // §5 rules 3–6: back-off, direction filter, 1.5 km cut-off, congestion control
             relay_rules: true,
+            // AUDIT S-08: 60 peers at 10 Hz
+            rx_budget_per_s: Some(600),
             // §5 rule 1: heartbeats TTL 2, events TTL 5
             heartbeat_ttl: 2,
             event_ttl: 5,
@@ -670,6 +680,7 @@ mod tests {
         assert!(c.ignore_static_overlap);
         assert!(c.danger_needs_confirmation); // user decision, Step 4
         assert!(c.relay_rules); // §5
+        assert_eq!(c.rx_budget_per_s, Some(600)); // AUDIT S-08
         assert_eq!(
             (c.relay_backoff_max_s, c.relay_cutoff_m, c.congestion_peers),
             (0.06, 1500.0, 60)

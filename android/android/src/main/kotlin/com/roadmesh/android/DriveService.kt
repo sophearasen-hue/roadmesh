@@ -46,6 +46,8 @@ class DriveService : Service() {
     private var ticks = 0L
     private val fieldLog = FieldLog()
     private var bridge: CellularBridge? = null
+    /** AUDIT S-12: a rooted phone receives and warns but sends nothing. */
+    private val receiveOnly: Boolean by lazy { DeviceTrust.compromised() }
 
     private val listener = LocationListener { loc ->
         prevLocation = location
@@ -119,8 +121,10 @@ class DriveService : Service() {
             val t = now()
             fixAt(t)?.let { fix ->
                 val frames = e.transmit(t, fix, road)
-                frames.firstOrNull()?.let { radio.broadcast(it) }
-                frames.forEach { bridge?.upload(it) } // hazard events only
+                if (!receiveOnly) {
+                    frames.firstOrNull()?.let { radio.broadcast(it) }
+                    frames.forEach { bridge?.upload(it) } // hazard events only
+                }
                 val p = Crypto.hex(e.pseudonym(t))
                 if (p != lastPseudonym) {
                     if (lastPseudonym.isNotEmpty()) radio.renewAddress()
@@ -183,7 +187,7 @@ class DriveService : Service() {
         val r = e.receive(frame, t, fix)
         if (r is RxResult.Accepted) {
             fieldLog.onAccepted(Crypto.hex(r.pseudonym), rssi)
-            bridge?.upload(frame) // events heard by radio reach phones out of range
+            if (!receiveOnly) bridge?.upload(frame) // events heard by radio reach phones out of range
         }
     }
 
@@ -215,7 +219,8 @@ class DriveService : Service() {
 
     /** Radio facts for the status screen. */
     fun status(): Map<String, Any> = mapOf(
-        "canSend" to radio.canSend,
+        "canSend" to (radio.canSend && !receiveOnly),
+        "receiveOnly" to receiveOnly,
         "codedPhy" to radio.codedPhy,
         "maxDataLength" to radio.maxDataLength,
         "certificates" to (engine?.validCertificates(now())?.toInt() ?: 0),

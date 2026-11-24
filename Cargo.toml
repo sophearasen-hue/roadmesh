@@ -25,3 +25,8 @@ panic = "deny"
 # verifies every message with real ECDSA. Optimises dependencies only.
 [profile.dev.package."*"]
 opt-level = 3
+
+# Release builds of the phone library and the server: no debug info in the shipped
+# binary (AUDIT S-12). Crash symbolication uses separately kept debug files.
+[profile.release]
+strip = "debuginfo"
