@@ -23,6 +23,28 @@ pub const MAX_FILTERS: usize = 16;
 /// Longest client identifier (bytes).
 pub const MAX_CLIENT_ID: usize = 64;
 
+/// RoadMesh topics (docs/SERVER.md), shared by the edge server and the phones.
+pub mod topic {
+    /// Phone → server: one radio frame.
+    pub const UP: &str = "rm/v1/up";
+    /// Server → phones: prefix of hazard-event topics, followed by a geohash cell.
+    pub const EVENTS: &str = "rm/v1/ev/";
+    /// Server → phones: the signed revocation list.
+    pub const CRL: &str = "rm/v1/crl";
+    /// Phone → server: a misbehaviour report.
+    pub const REPORT: &str = "rm/v1/report";
+    /// Phone → server: delete my data.
+    pub const DELETE: &str = "rm/v1/delete";
+    /// Phone → server (enrolment port): certificate request.
+    pub const ENROL: &str = "rm/v1/enrol";
+    /// Server → phone: enrolment answer.
+    pub const ENROL_REPLY: &str = "rm/v1/enrol/reply";
+    /// Server → phone: report answer.
+    pub const REPORT_REPLY: &str = "rm/v1/reply/report";
+    /// Server → phone: delete answer.
+    pub const DELETE_REPLY: &str = "rm/v1/reply/delete";
+}
+
 /// A packet of the subset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Packet {

@@ -39,24 +39,9 @@ use crate::hazard::{HazardGate, Upload};
 use crate::limits::{KeyedLimiter, TokenBucket};
 use crate::monitor::{Metric, Monitor, device_ref};
 
-/// Topic prefix of hazard events.
-pub const EVENTS: &str = "rm/v1/ev/";
-/// Uploads.
-pub const UP: &str = "rm/v1/up";
-/// Revocation list.
-pub const CRL: &str = "rm/v1/crl";
-/// Misbehaviour reports.
-pub const REPORT: &str = "rm/v1/report";
-/// Delete my data.
-pub const DELETE: &str = "rm/v1/delete";
-/// Certificate requests.
-pub const ENROL: &str = "rm/v1/enrol";
-/// Enrolment answer.
-pub const ENROL_REPLY: &str = "rm/v1/enrol/reply";
-/// Report answer.
-pub const REPORT_REPLY: &str = "rm/v1/reply/report";
-/// Delete answer.
-pub const DELETE_REPLY: &str = "rm/v1/reply/delete";
+pub use roadmesh_core::mqtt::topic::{
+    CRL, DELETE, DELETE_REPLY, ENROL, ENROL_REPLY, EVENTS, REPORT, REPORT_REPLY, UP,
+};
 
 /// Limits.
 #[derive(Debug, Clone)]

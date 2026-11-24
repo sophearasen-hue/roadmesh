@@ -1726,6 +1726,7 @@ dependencies = [
  "p256",
  "roadmesh-core",
  "roadmesh-server",
+ "tokio",
  "uniffi",
 ]
 
