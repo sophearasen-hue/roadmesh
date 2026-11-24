@@ -10,7 +10,9 @@
 //! simulated: software keys from a seeded generator ([`keys`]), which is
 //! simulator-only and must never be used by the product.
 
+pub mod city;
 pub mod keys;
+pub mod report;
 pub mod rng;
 pub mod scenarios;
 pub mod world;

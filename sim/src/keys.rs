@@ -90,6 +90,17 @@ pub fn new_ca(rng: &mut SimRng, cfg: Config) -> SimCa {
 
 /// Enrol a phone: device key + `n` pseudonym keys, certificates issued by `ca` at `now`.
 pub fn enrol(ca: &mut SimCa, rng: &mut SimRng, n: usize, now: u32) -> PseudonymSigner<SoftKeys> {
+    enrol_with(ca, rng, n, now, &Security::v0())
+}
+
+/// [`enrol`] with given security settings (rotation, full-certificate policy).
+pub fn enrol_with(
+    ca: &mut SimCa,
+    rng: &mut SimRng,
+    n: usize,
+    now: u32,
+    sec: &Security,
+) -> PseudonymSigner<SoftKeys> {
     let device = key_from(rng);
     let keys: Vec<SigningKey> = (0..n).map(|_| key_from(rng)).collect();
     let mut req = IssueRequest {
@@ -105,7 +116,7 @@ pub fn enrol(ca: &mut SimCa, rng: &mut SimRng, n: usize, now: u32) -> PseudonymS
     for (c, k) in certs.iter().zip(keys) {
         store.0.insert(c.digest(), k);
     }
-    PseudonymSigner::new(certs, store, &Security::v0())
+    PseudonymSigner::new(certs, store, sec)
 }
 
 /// An outsider's signer: certificates from a CA key nobody trusts (forged).

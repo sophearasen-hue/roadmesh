@@ -96,6 +96,8 @@ pub enum Misbehaviour {
     RateTooHigh,
     /// Moved faster than physically possible since its last message (implied m/s).
     PositionJump(f64),
+    /// Claimed position far from any road (m off the road). SPEC §10.
+    OffRoad(f64),
 }
 
 /// One LDM entry.
@@ -157,10 +159,14 @@ impl Ldm {
             if dt < cfg.min_msg_interval_s - 1e-9 {
                 return Check::Misbehaviour(Misbehaviour::RateTooHigh);
             }
-            let implied = (m.x - prev.motion.x).hypot(m.y - prev.motion.y) / dt;
-            if implied
-                > m.speed.max(prev.motion.speed) * cfg.jump_speed_factor + cfg.jump_speed_slack
-            {
+            let moved = (m.x - prev.motion.x).hypot(m.y - prev.motion.y);
+            let implied = moved / dt;
+            let vmax = m.speed.max(prev.motion.speed);
+            let jump = match cfg.jump_slack_m {
+                Some(slack) => moved > vmax * dt + slack, // SPEC §10
+                None => implied > vmax * cfg.jump_speed_factor + cfg.jump_speed_slack,
+            };
+            if jump {
                 return Check::Misbehaviour(Misbehaviour::PositionJump(implied));
             }
         }
@@ -306,6 +312,28 @@ mod tests {
             ldm.check(&msg(1.1, 1.0, 10.0, 0.0, 2), 1.1, &cfg),
             Check::Ok
         );
+    }
+
+    #[test]
+    fn spec_jump_rule_tolerates_gps_jitter_but_not_teleports() {
+        let cfg = Config::spec_v0();
+        let mut ldm = Ldm::new();
+        ldm.update(msg(1.0, 0.0, 10.0, 0.0, 1), 1.0, 0);
+        // 1 m of travel plus 6 m of GPS jitter in 0.1 s: honest under SPEC §10
+        assert_eq!(
+            ldm.check(&msg(1.1, 7.0, 10.0, 0.0, 2), 1.1, &cfg),
+            Check::Ok
+        );
+        // the reference rule (1.5 v + 10 m/s) would have called that a jump
+        assert!(matches!(
+            ldm.check(&msg(1.1, 7.0, 10.0, 0.0, 2), 1.1, &Config::reference()),
+            Check::Misbehaviour(Misbehaviour::PositionJump(_))
+        ));
+        // 30 m in 0.1 s at 10 m/s: impossible
+        assert!(matches!(
+            ldm.check(&msg(1.1, 30.0, 10.0, 0.0, 3), 1.1, &cfg),
+            Check::Misbehaviour(Misbehaviour::PositionJump(_))
+        ));
     }
 
     /// reference test_message_flood_is_rejected (the LDM part)

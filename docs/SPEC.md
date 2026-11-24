@@ -143,6 +143,8 @@ Each phone keeps a Local Dynamic Map (LDM): a small live table of every peer it 
 
 *Implementation note (Step 2).* The core predicts vehicle outlines (rotated rectangles), not points. Each outline is lengthened at both ends by that vehicle's reported position accuracy. It is not widened sideways: on a two-lane road the lanes are only 3.5 m apart, and sideways widening made every oncoming vehicle a false conflict. Separating adjacent lanes is the job of map matching (Step 4).
 
+*Implementation note (Step 4).* Step 3 of the pipeline is a Kalman filter on position whose prediction uses the reported speed, heading, acceleration and turn rate (more precise than GPS position); it removes fix-to-fix jitter but not slowly drifting GPS bias. Step 4 keeps a matched track on its own side of the road (between the lane centres of its direction) and aligns straight-driving tracks with the road; it does not pick a lane, because phone GPS cannot tell adjacent same-direction lanes apart. For same-direction vehicles whose combined position error exceeds 1.5 m the lateral error is added to the conflict check, and such a rear-end conflict is a Warning with braking advice until it is under 2 s away, then Danger. Map-match confidence treats the reported accuracy as a 68 % radius. Results: `docs/SIM_REPORT.md`.
+
 **Confidence gate.** No Warning or Danger alert is raised from a track with map-match confidence under 0.7 or position accuracy worse than 8 m. Such tracks still appear on the map as faded icons. If such a track is on a collision course, the driver gets a Caution "possible conflict, ease off" so they are never left without a hint (decision of 2026-11-23); it never becomes Danger, so it cannot cause false emergency alarms.
 
 ## 7. Behaviour detection and scoring
@@ -251,8 +253,8 @@ A fake "hard braking" message could cause a crash, and position data could be us
 **Misbehaviour detection.** Reject and report a message when any of these hold:
 
 - Speed above 200 km/h, or acceleration above 12 m/s²
-- Position jumps more than speed × time + 15 m between messages
-- Claimed position not on or near a road
+- Position jumps more than speed × time + 15 m between messages (the product profile uses exactly this; the reference's speed-ratio rule blocked honest phones with ordinary GPS jitter in the Step 4 simulation)
+- Claimed position not on or near a road (more than 50 m, or 3 × its accuracy, outside every road, within the map's coverage)
 - The sender claims to be within 30 m but its signal strength is impossible for that distance
 
 The reporting phone blocks the sender locally at once and sends the server a report signed with its own pseudonym key, carrying the offending signed messages as evidence. The server re-checks the signatures and the evidence, and revokes **all** certificates of a device once 3 different devices have filed confirmed reports (several pseudonyms of one phone count once). A revoked device gets no new certificates. Each device may file at most 50 reports a day. The "not near a road" check arrives with map matching (Step 4) and the signal-strength check with the Bluetooth transport (Step 5).
