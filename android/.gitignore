@@ -1,0 +1,9 @@
+.dart_tool/
+build/
+.packages
+pubspec.lock
+# built by scripts/build-android-core.sh (Rust core + generated bindings)
+android/src/main/jniLibs/
+android/src/main/kotlin/com/roadmesh/core/
+android/local.properties
+android/.gradle/

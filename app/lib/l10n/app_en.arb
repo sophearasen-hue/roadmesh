@@ -7,5 +7,64 @@
   "tagline": "Peer-to-peer road safety",
   "@tagline": {
     "description": "One-line description under the app name."
-  }
+  },
+  "radioTest": "Radio test",
+  "@radioTest": {
+    "description": "Debug-only screen title: Bluetooth radio field test."
+  },
+  "radioStart": "Start drive",
+  "radioStop": "Stop drive",
+  "radioPermissionDenied": "Bluetooth and location permission are needed to warn you.",
+  "radioRequest": "Create certificate request",
+  "radioImport": "Import certificates",
+  "radioExportLog": "Export field log",
+  "radioSavedTo": "Saved: {path}",
+  "@radioSavedTo": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "radioCertificates": "Certificates: {count}",
+  "@radioCertificates": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "radioCannotSend": "This phone cannot send long Bluetooth messages: receive only.",
+  "radioCodedPhy": "Long-range Bluetooth: {yes}",
+  "@radioCodedPhy": {
+    "placeholders": {
+      "yes": {
+        "type": "String"
+      }
+    }
+  },
+  "yes": "yes",
+  "no": "no",
+  "radioNoPeers": "No other phones heard yet.",
+  "radioPeer": "{type} · {distance} m · {speed} km/h",
+  "@radioPeer": {
+    "placeholders": {
+      "type": {
+        "type": "String"
+      },
+      "distance": {
+        "type": "int"
+      },
+      "speed": {
+        "type": "int"
+      }
+    }
+  },
+  "typeCar": "Car",
+  "typeMoto": "Motorbike",
+  "typeTuk": "Tuk-tuk",
+  "typeTruck": "Truck",
+  "typeOther": "Vehicle",
+  "notifTitle": "RoadMesh is on",
+  "notifText": "Watching the road around you"
 }

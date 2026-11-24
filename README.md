@@ -23,7 +23,11 @@ Peer-to-peer road safety for every vehicle — cars, motorbikes, tuk-tuks — on
 | `docs/RELEASE.md` | Release checklist (24 h fuzz run, secret scan, trust anchors) | Updated as steps add gates |
 | `docs/DECISIONS.md` | Decisions taken during the build | Updated each step |
 | `app/` | Flutter app, strings in `lib/l10n/app_en.arb` / `app_km.arb` | Skeleton (Step 8) |
-| `ios/`, `android/` | Swift / Kotlin radio, keys, CarPlay | Placeholders (Steps 5, 6, 10) |
+| `android/` | Flutter plugin `roadmesh_android`: Bluetooth LE transport, foreground service, Keystore keys, field-test log; runs the Rust core | Step 5 (field test pending) |
+| `ios/` | Swift radio, Secure Enclave keys, CarPlay | Placeholder (Steps 6, 10) |
+| `ffi/` | UniFFI bindings from the phone apps to `core/` | Step 5 |
+| `tools/devca` | Developer certificate authority for field tests (debug builds only) | Step 5 |
+| `docs/DATA_SAFETY.md` | Store privacy answers, kept in step with the code | Updated each step |
 | `.github/workflows/ci.yml` | CI: Rust fmt/clippy/test, cargo audit, Flutter analyze/test, gitleaks, fuzz smoke test, reference guard + tests | Runs on every push |
 | `scripts/check-reference.sh` | Fails if anything under `reference/` changes (checksums in `docs/reference.sha256`) | Runs in CI |
 

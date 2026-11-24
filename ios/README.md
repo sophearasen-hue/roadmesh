@@ -7,6 +7,7 @@ Will contain:
 - CarPlay Driving Task scene (list/grid template, SPEC §9)
 - Secure Enclave key generation and signing (AUDIT S-02)
 
-Open decision before Step 5: Flutter keeps its own iOS project in `app/ios/`.
-This folder should become a Flutter plugin package (e.g. `plugins/roadmesh_ios`)
-or hold Swift packages that `app/ios` links. Not changed without approval.
+Decided in Step 5: this folder becomes the Flutter plugin package `roadmesh_ios`
+(like `android/` = `roadmesh_android`), with the Rust core linked through the
+UniFFI Swift bindings from `ffi/` (module `RoadMeshCore`). Flutter keeps its own
+iOS project in `app/ios/`.

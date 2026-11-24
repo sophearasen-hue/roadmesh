@@ -13,6 +13,8 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   intl: any
+  roadmesh_android:
+    path: ../android
 
 dev_dependencies:
   flutter_test:

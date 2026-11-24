@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core", "sim", "server"]
+members = ["core", "sim", "server", "ffi", "ffi/uniffi-bindgen", "tools/devca"]
 # cargo-fuzz targets build with a pinned nightly (see fuzz/README.md)
 exclude = ["fuzz"]
 

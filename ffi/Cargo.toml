@@ -1,0 +1,32 @@
+[package]
+name = "roadmesh-ffi"
+description = "Bindings from the Android and iOS apps to roadmesh-core (UniFFI). The only crate allowed to contain (generated) unsafe code."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "roadmesh_ffi"
+crate-type = ["cdylib", "staticlib", "lib"]
+
+[dependencies]
+roadmesh-core = { path = "../core" }
+uniffi = { version = "0.32.2", default-features = false }
+
+[dev-dependencies]
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "getrandom"] }
+roadmesh-server = { path = "../server" }
+
+# Same lints as the workspace, except unsafe code: UniFFI's generated scaffolding uses it.
+# The hand-written code in this crate contains none.
+[lints.rust]
+unsafe_code = "allow"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
