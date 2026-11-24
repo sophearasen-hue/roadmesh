@@ -11,4 +11,5 @@ pub mod devca;
 pub mod hazard;
 pub mod limits;
 pub mod monitor;
+pub mod serve;
 pub mod tls;

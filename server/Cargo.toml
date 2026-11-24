@@ -36,8 +36,11 @@ aws-config = { version = "1", optional = true, default-features = false, feature
 aws-sdk-kms = { version = "1", optional = true, default-features = false, features = ["rt-tokio", "default-https-client"] }
 
 [dev-dependencies]
+# Tests make throwaway TLS server certificates and speak TLS 1.2 to prove it is refused.
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 # Tests generate throwaway CA and device keys from the OS random source at run time.
-p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "getrandom", "pkcs8"] }
+p256 = { version = "0.14.0", default-features = false, features = ["ecdsa", "getrandom", "pkcs8", "alloc"] }
 
 [lints]
 workspace = true
