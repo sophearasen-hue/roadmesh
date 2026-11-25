@@ -21,7 +21,7 @@
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
-    <application>
+    <application android:allowBackup="false">
         <service
             android:name="com.roadmesh.android.DriveService"
             android:exported="false"

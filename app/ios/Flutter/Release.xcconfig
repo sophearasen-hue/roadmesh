@@ -2,3 +2,9 @@
 // The edge server and production CA anchor (docs/SERVER.md): Flutter/Server.xcconfig with
 // ROADMESH_SERVER_HOST, ROADMESH_SERVER_PINS (current,backup) and ROADMESH_CA_ANCHOR.
 #include? "Server.xcconfig"
+// AUDIT S-12: strip Swift and local symbols from the release app (dSYM kept for crash reports)
+DEPLOYMENT_POSTPROCESSING = YES
+STRIP_INSTALLED_PRODUCT = YES
+STRIP_STYLE = all
+STRIP_SWIFT_SYMBOLS = YES
+DEAD_CODE_STRIPPING = YES

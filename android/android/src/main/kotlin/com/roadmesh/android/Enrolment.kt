@@ -29,8 +29,11 @@ class Enrolment(private val context: Context, private val keys: KeystoreKeys) {
     /** Request file the developer pulls with adb. */
     val requestFile: File get() = File(dir, "roadmesh-request.bin")
 
-    /** Certificate file the developer pushes with adb. */
+    /** Certificate file the developer pushes with adb (debug builds). */
     val certificateFile: File get() = File(dir, "roadmesh-certificates.bin")
+
+    /** Certificates in use, in app-private storage (AUDIT S-20); never on shared storage. */
+    private val storedFile: File get() = File(context.filesDir, "roadmesh-certificates.bin")
 
     /** Generate 20 new pseudonym keys and write a signed certificate request. */
     fun createRequest(count: Int = 20, nowUnix: Long = System.currentTimeMillis() / 1000): File {
@@ -69,8 +72,7 @@ class Enrolment(private val context: Context, private val keys: KeystoreKeys) {
         val reply = exchange(config, wire)
         val enrolled = parseEnrolReply(reply)
         deviceCertFile.writeBytes(enrolled.deviceCertificate)
-        certificateFile.writeBytes(enrolled.certificates)
-        return importCertificates()
+        return bindCertificates(enrolled.certificates)
     }
 
     /** Play Integrity (classic request) with nonce = SHA-256 of the request, as the server checks. */
@@ -115,6 +117,11 @@ class Enrolment(private val context: Context, private val keys: KeystoreKeys) {
      */
     fun importCertificates(): ByteArray {
         val bytes = certificateFile.readBytes()
+        certificateFile.delete() // the adb copy on external storage is not kept
+        return bindCertificates(bytes)
+    }
+
+    private fun bindCertificates(bytes: ByteArray): ByteArray {
         val batch = pending.getLong("batch", -1)
         val count = pending.getInt("count", 0)
         val byPublicKey = (0 until count).associate { i ->
@@ -127,11 +134,12 @@ class Enrolment(private val context: Context, private val keys: KeystoreKeys) {
             val alias = byPublicKey[Crypto.hex(p)] ?: error("certificate for a key this phone does not have")
             keys.bind(d, alias)
         }
+        storedFile.writeBytes(bytes)
         return bytes
     }
 
     /** Previously imported certificates (kept across restarts), or null. */
-    fun storedCertificates(): ByteArray? = certificateFile.takeIf { it.exists() }?.readBytes()
+    fun storedCertificates(): ByteArray? = storedFile.takeIf { it.exists() }?.readBytes()
 
     /** Forget the device certificate (the server forgets the device too; see docs/SERVER.md). */
     fun forgetDevice() {
