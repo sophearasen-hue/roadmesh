@@ -130,6 +130,15 @@ jobs:
           flutter config --enable-swift-package-manager
           flutter pub get --enforce-lockfile
           flutter build ios --simulator --debug
+      - name: App bundle carries the privacy manifest and the English/Khmer permission texts (AUDIT L-02, L-03)
+        working-directory: app
+        run: |
+          app=build/ios/iphonesimulator/Runner.app
+          test -f "$app/PrivacyInfo.xcprivacy"
+          test -f "$app/en.lproj/InfoPlist.strings"
+          test -f "$app/km.lproj/InfoPlist.strings"
+          plutil -extract CPTemplateApplicationSceneSessionRoleApplication raw -o - "$app/Info.plist" >/dev/null 2>&1 \
+            || plutil -p "$app/Info.plist" | grep -q CPTemplateApplicationScene
 
   gitleaks:
     name: Secret scan (gitleaks)
