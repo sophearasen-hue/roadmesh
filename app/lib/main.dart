@@ -50,6 +50,7 @@ class _RoadMeshAppState extends State<RoadMeshApp> {
       c.attach(RoadMeshRadio.updates);
       c.onAlertTone = RoadMeshRadio.alertTone;
       _carplay = CarPlayLink(onMute: c.setMuted);
+      if (kDebugMode) c.onStartDemo = _startDemo;
     }
   }
 
@@ -74,7 +75,7 @@ class _RoadMeshAppState extends State<RoadMeshApp> {
   }
 
   void _startDemo() {
-    if (!kDebugMode) return;
+    if (!kDebugMode || _demo != null) return;
     final d = DemoTraffic();
     _demo = d;
     c.demo = d;

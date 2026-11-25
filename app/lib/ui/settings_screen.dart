@@ -181,6 +181,21 @@ class SettingsScreen extends StatelessWidget {
         ]),
         if (kDebugMode)
           section(l.debugTools, [
+            if (c.onStartDemo != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton(
+                    key: const Key('startDemo'),
+                    onPressed: () {
+                      c.onStartDemo?.call();
+                      c.select(AppTab.drive);
+                    },
+                    child: Text(l.demoMode),
+                  ),
+                ),
+              ),
             Align(
               alignment: Alignment.centerLeft,
               child: OutlinedButton(

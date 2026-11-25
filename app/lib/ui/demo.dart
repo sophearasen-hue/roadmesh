@@ -47,9 +47,11 @@ class DemoTraffic implements DemoHooks {
   final math.Random _rnd;
   final _vs = <_V>[];
   final _events = <Map<String, Object?>>[];
+  // starts at about 8 km/h so every screen can be opened (they lock above 10 km/h);
+  // "+" speeds up
   double _mx = 0,
-      _mv = 11,
-      _bias = 0,
+      _mv = 2,
+      _bias = -9,
       _brakeT = 0,
       _t = 0,
       _dist = 0,
