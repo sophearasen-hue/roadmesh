@@ -124,6 +124,11 @@ class DriveController extends ChangeNotifier {
   set demo(DemoHooks? d) => _demo = kDebugMode ? d : null;
   DemoHooks? _demo;
 
+  /// Debug builds: starts the demo traffic (Settings → Debug tools). Null in release.
+  VoidCallback? get onStartDemo => kDebugMode ? _onStartDemo : null;
+  set onStartDemo(VoidCallback? f) => _onStartDemo = kDebugMode ? f : null;
+  VoidCallback? _onStartDemo;
+
   /// Debug only: relay hop limit shown in Settings (release uses SPEC §5 TTLs, P-25).
   int debugMaxHops = 4;
 
