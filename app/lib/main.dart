@@ -8,6 +8,7 @@ import 'ui/carplay.dart';
 import 'ui/controller.dart';
 import 'ui/demo.dart';
 import 'ui/home.dart';
+import 'ui/onboarding.dart';
 import 'ui/style.dart';
 
 Future<void> main() async {
@@ -67,7 +68,7 @@ class _RoadMeshAppState extends State<RoadMeshApp> {
     await RoadMeshRadio.start(
       notificationTitle: l.notifTitle,
       notificationText: l.notifText,
-      vehicleType: c.motorbikeMode ? 1 : 0,
+      vehicleType: c.vehicleType,
     );
     setState(() => _driving = true);
   }
@@ -99,6 +100,7 @@ class _RoadMeshAppState extends State<RoadMeshApp> {
               carPlayModel(AppLocalizations.of(context), u, muted: c.muted),
             );
           }
+          if (!c.onboarded) return OnboardingScreen(c: c);
           return HomeScreen(
             c: c,
             driving: _driving,

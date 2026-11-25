@@ -46,3 +46,35 @@ The "done when" for Step 11 is "section B all PASS; MobSF no high findings". **M
 4. **Publish the security contact** and fill in its placeholder in `SECURITY.md`. Fill in the roles in `docs/INCIDENT_RESPONSE.md` (S-26, S-27).
 5. **Before public launch:** a MobSF scan of the final binaries and an independent penetration test (S-25).
 6. **At Gate 1, on real phones:** confirm StrongBox/Secure Enclave (S-02), and that the BLE address rotates with the pseudonym (S-13), using a BLE sniffer.
+
+# Audit report: section C, store launch readiness (BUILD_PLAN Step 14)
+
+Everything that can be prepared in the repository is done. The rest needs your developer accounts, Apple's entitlement decision, a beta with real drivers, or lawyers. Store-ready content is in `docs/STORE.md`; privacy answers are in `docs/DATA_SAFETY.md`; policy, terms and support pages are in `docs/legal/`.
+
+| ID | Requirement | Status | Evidence / what is left |
+|---|---|---|---|
+| L-01 | Apple Developer Program account | **OWNER** | Organisation account recommended (also smoother on Play, L-15). |
+| L-02 | Privacy manifest in the app and every SDK | **PASS** | **New:** `app/ios/Runner/PrivacyInfo.xcprivacy` (precise location and device ID, not linked, no tracking; UserDefaults CA92.1), plus the plugin's manifest; Flutter and shared_preferences ship their own. A CI step checks the built app contains it. |
+| L-03 | Purpose strings in English and Khmer | **PASS** | `Runner/{en,km}.lproj/InfoPlist.strings`. **Fixed in Step 14:** these were bundled into the test target, not the app; CI now checks the app bundle. No motion sensors, so no `NSMotionUsageDescription`. Khmer wording awaits native review (P-44). |
+| L-04 | Background modes only if used | **PASS** | `bluetooth-central`, `bluetooth-peripheral`, `location`, each justified in `docs/STORE.md`. |
+| L-05 | App Privacy answers match data handling | **PASS** | `docs/DATA_SAFETY.md`, checked against the code and section B. Enter it in App Store Connect. |
+| L-06 | CarPlay Driving Task entitlement | **OWNER** | Request it now (`docs/CARPLAY.md`); the app works without it. |
+| L-07 | Safety disclaimer; no interaction while driving | **PASS** | **New:** onboarding safety notice that must be accepted ("driver assistance, not a guarantee; never brakes or steers", tested in both languages); screens other than Drive lock above 10 km/h (P-16); CarPlay list template only. |
+| L-08 | TestFlight beta with real drivers | **OWNER** | Step 12. |
+| L-09 | Privacy policy and support URLs; screenshots in English and Khmer | **PASS (content) / OWNER** | `docs/legal/privacy-policy.{en,km}.md`, `support.{en,km}.md`; 8 iPhone 6.9″ screenshots (`docs/store/screenshots/ios-*`). You publish the pages on your domain and fill in the contact placeholders. |
+| L-10 | targetSdk 36+ | **PASS** | `app/android/app/build.gradle.kts`: targetSdk 36. |
+| L-11 | FGS types, permissions, Play Console declaration with demo video | **PASS (code) / OWNER** | Manifest declares `connectedDevice|location` with matching permissions; declaration text and video script in `docs/STORE.md`. You record the video and submit. |
+| L-12 | Location declaration | **PASS (content) / OWNER** | Justification text in `docs/STORE.md`; no background-location permission requested (foreground service only). |
+| L-13 | Data safety form matches | **PASS** | `docs/DATA_SAFETY.md` (Play section); backups disabled to match. |
+| L-14 | Bluetooth permissions | **PASS** | SCAN, ADVERTISE, CONNECT; `neverForLocation` deliberately not set (fine location is held anyway). |
+| L-15 | Closed testing track | **OWNER** | 12 testers for 14 days on a personal account; plan for it in Step 12. |
+| L-16 | Play App Signing, R8, release AAB | **PASS (code) / OWNER** | R8 and shrinking on, obfuscated AAB command in `docs/STORE.md` and `docs/RELEASE.md`; you enable Play App Signing. |
+| L-17 | Policy URL, listing and screenshots in English and Khmer | **PASS (content) / OWNER** | Listing texts in `docs/STORE.md`; 8 Android screenshots (`docs/store/screenshots/android-*`). Publish the policy. |
+| L-18 | Crash-free sessions ≥ 99.5% in beta | **OWNER** | Measured in Step 12 (Gate 3). |
+| L-19 | Battery < 8%/hour on a low-end Android | **OWNER** | Measured with the field log in Step 12 (Gate 1/3). |
+| L-20 | Legal review | **OWNER** | Drafts in `docs/legal/` (terms, privacy policy) for Cambodian counsel; TRC approval only if the LoRa dongle ships (not in the MVP). |
+
+**Summary:**
+- **Done in the repository:** 8 PASS, plus 6 with all content ready and the submission left to you.
+- **Owner-only:** 6 (accounts, entitlement, beta, the beta's measurements, legal).
+- **Review before submission:** all Khmer texts (P-44).

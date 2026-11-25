@@ -141,9 +141,12 @@ Future<void> pumpApp(
   WidgetTester t,
   DriveController c, {
   Size size = const Size(360, 760),
+  bool onboarded = true,
+  double pixelRatio = 2,
 }) async {
-  t.view.physicalSize = size * 2;
-  t.view.devicePixelRatio = 2;
+  if (onboarded) c.onboarded = true;
+  t.view.physicalSize = size * pixelRatio;
+  t.view.devicePixelRatio = pixelRatio;
   addTearDown(t.view.reset);
   await t.pumpWidget(RoadMeshApp(controller: c));
   await t.pump(const Duration(milliseconds: 50));

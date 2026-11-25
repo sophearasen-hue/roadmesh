@@ -726,5 +726,37 @@
   "alertSoundD": "A tone for Warning, a chime for Danger. Mute also from CarPlay.",
   "@alertSoundD": {
     "description": "New in Step 8 (not in the references)."
+  },
+  "onboardWelcome": "Welcome to RoadMesh",
+  "@onboardWelcome": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "onboardLanguage": "Choose your language",
+  "@onboardLanguage": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "vehicleType": "Vehicle type",
+  "@vehicleType": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "onboardVehicle": "What do you drive?",
+  "@onboardVehicle": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "safetyTitle": "Before you drive",
+  "@safetyTitle": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "safetyText": "RoadMesh helps you notice vehicles you may not see. It is driver assistance, not a guarantee: it cannot see vehicles without the app and it can be wrong. It never brakes or steers for you. Keep your eyes on the road, follow the traffic law, and do not touch the phone while driving.",
+  "@safetyText": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "onboardAccept": "I understand",
+  "@onboardAccept": {
+    "description": "New in Step 8 (not in the references)."
+  },
+  "onboardNext": "Next",
+  "@onboardNext": {
+    "description": "New in Step 8 (not in the references)."
   }
 }
