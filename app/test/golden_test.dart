@@ -60,6 +60,18 @@ void main() {
       'settings $lang',
       (t) => shot(t, 'settings', (c) => c.select(AppTab.settings)),
     );
+    testWidgets('onboarding safety $lang', (t) async {
+      final c = controllerWith(sample(), lang: lang);
+      await pumpApp(t, c, onboarded: false);
+      for (var i = 0; i < 2; i++) {
+        await t.tap(find.byKey(const Key('ob-next')));
+        await t.pump(const Duration(milliseconds: 50));
+      }
+      await expectLater(
+        find.byType(MaterialApp),
+        matchesGoldenFile('goldens/onboarding-$lang.png'),
+      );
+    });
     testWidgets(
       'carplay $lang',
       (t) => shot(

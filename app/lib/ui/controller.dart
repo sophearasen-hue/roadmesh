@@ -46,6 +46,28 @@ class DriveController extends ChangeNotifier {
     if (lang == 'en' || lang == 'km') locale = Locale(lang!);
     motorbikeMode = prefs?.getBool(_kMoto) ?? false;
     muted = prefs?.getBool(_kMuted) ?? false;
+    onboarded = prefs?.getBool(_kOnboarded) ?? false;
+    vehicleType = prefs?.getInt(_kVehicle) ?? 1;
+  }
+
+  /// The driver has seen the safety notice and chosen language and vehicle (SPEC §9).
+  bool onboarded = false;
+
+  /// Own vehicle type code (0 car, 1 motorbike, 2 tuk-tuk, 3 truck) for the safety message.
+  int vehicleType = 1;
+
+  /// Vehicle type, remembered.
+  Future<void> setVehicleType(int code) async {
+    vehicleType = code;
+    notifyListeners();
+    await prefs?.setInt(_kVehicle, code);
+  }
+
+  /// The driver accepted the safety notice (AUDIT L-07).
+  Future<void> finishOnboarding() async {
+    onboarded = true;
+    notifyListeners();
+    await prefs?.setBool(_kOnboarded, true);
   }
 
   /// Alert sounds muted (from Settings or the CarPlay Mute button).
@@ -61,6 +83,8 @@ class DriveController extends ChangeNotifier {
   static const _kLang = 'language';
   static const _kMoto = 'motorbikeMode';
   static const _kMuted = 'muted';
+  static const _kOnboarded = 'onboarded';
+  static const _kVehicle = 'vehicleType';
 
   /// Persistent settings (null in some tests).
   final SharedPreferences? prefs;

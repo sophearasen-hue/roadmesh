@@ -141,7 +141,9 @@ Future<void> pumpApp(
   WidgetTester t,
   DriveController c, {
   Size size = const Size(360, 760),
+  bool onboarded = true,
 }) async {
+  if (onboarded) c.onboarded = true;
   t.view.physicalSize = size * 2;
   t.view.devicePixelRatio = 2;
   addTearDown(t.view.reset);

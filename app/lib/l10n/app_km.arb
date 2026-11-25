@@ -272,5 +272,37 @@
   "alertSoundD": "សំឡេងសម្រាប់ការព្រមាន និងសំឡេងរោទ៍សម្រាប់គ្រោះថ្នាក់។ អាចបិទសំឡេងពី CarPlay ផងដែរ។",
   "@alertSoundD": {
     "x-needs-review": true
+  },
+  "onboardWelcome": "សូមស្វាគមន៍មកកាន់ RoadMesh",
+  "@onboardWelcome": {
+    "x-needs-review": true
+  },
+  "onboardLanguage": "ជ្រើសរើសភាសារបស់អ្នក",
+  "@onboardLanguage": {
+    "x-needs-review": true
+  },
+  "vehicleType": "ប្រភេទយានយន្ត",
+  "@vehicleType": {
+    "x-needs-review": true
+  },
+  "onboardVehicle": "តើអ្នកបើកបរយានអ្វី?",
+  "@onboardVehicle": {
+    "x-needs-review": true
+  },
+  "safetyTitle": "មុនពេលអ្នកបើកបរ",
+  "@safetyTitle": {
+    "x-needs-review": true
+  },
+  "safetyText": "RoadMesh ជួយអ្នកឱ្យដឹងពីយានដែលអ្នកប្រហែលជាមើលមិនឃើញ។ វាជាជំនួយដល់អ្នកបើកបរ មិនមែនជាការធានាទេ៖ វាមើលមិនឃើញយានដែលគ្មានកម្មវិធីនេះ ហើយវាអាចខុស។ វាមិនដែលហ្វ្រាំង ឬបង្វិលចង្កូតជំនួសអ្នកឡើយ។ សូមផ្ដោតភ្នែកលើផ្លូវ គោរពច្បាប់ចរាចរណ៍ ហើយកុំប៉ះទូរស័ព្ទពេលកំពុងបើកបរ។",
+  "@safetyText": {
+    "x-needs-review": true
+  },
+  "onboardAccept": "ខ្ញុំយល់ហើយ",
+  "@onboardAccept": {
+    "x-needs-review": true
+  },
+  "onboardNext": "បន្ទាប់",
+  "@onboardNext": {
+    "x-needs-review": true
   }
 }

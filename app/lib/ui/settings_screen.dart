@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import '../radio_test.dart';
 import 'controller.dart';
+import 'onboarding.dart' show vehicleChoices;
 import 'style.dart';
 import 'widgets.dart';
 
@@ -75,6 +76,14 @@ class SettingsScreen extends StatelessWidget {
             selected: lang == 'km' ? 1 : 0,
             onTap: (i) => c.setLanguage(i == 1 ? 'km' : 'en'),
             keys: const [Key('lang-en'), Key('lang-km')],
+          ),
+        ]),
+        section(l.vehicleType, [
+          Chips(
+            [for (final v in vehicleChoices) typeName(l, v)],
+            selected: vehicleChoices.indexOf(c.vehicleType),
+            onTap: (i) => c.setVehicleType(vehicleChoices[i]),
+            keys: [for (final v in vehicleChoices) Key('vehicle-$v')],
           ),
         ]),
         section(l.radioMode, [
